@@ -1,72 +1,9 @@
 import os
 import os.path
 import hashlib
-from posixpath import relpath
 import yaml
 import time
-import urllib.parse as urlpar
-
-
-def main():
-    ce = CommandExecute()
-    while 1:
-        print()
-        print('请输入指令(输入指令“help”获取帮助)(索引目录为%s)' % ce.indexPath)
-        inputStr = input('%s>' % os.path.abspath(ce.folderPath))
-        inputArgs = inputStr.split(' ')
-        if inputArgs[0] == 'help':
-            ce.cmd_help()
-        elif inputArgs[0] == 'update':
-            ce.cmd_update()
-        elif inputArgs[0] == 'cd':
-            ce.cmd_cd(inputArgs[1])
-        elif inputArgs[0] == 'cd_index':
-            ce.cmd_cd_index(inputArgs[1])
-        elif inputArgs[0] == 'exit':
-            exit()
-        elif inputArgs[0] == 'check':
-            pass
-        elif inputArgs[0] == 'history':
-            pass
-        elif inputArgs[0] == 'domain_init':
-            pass
-        elif inputArgs[0] == 'package_init':
-            pass
-        else:
-            print('指令错误(输入指令“help”获取帮助)')
-
-
-class CommandExecute:
-    def __init__(self):
-        self.folderPath = '.'
-        self.indexPath = '.FileManagement_Index'
-
-    def cmd_help(self):
-        print('''
-        help                    打开帮助
-        update                  初始化/更新索引信息
-        exit                    退出
-        cd [路径]               改变当前目录
-        cd_index [路径]         改变索引生成目录(如果输入是相对目录，则起点为当前目录)
-        ''')
-
-    def cmd_cd(self, dir_):
-        gt = GeneralTools()
-        self.folderPath = gt.pathJoin(dir_, self.folderPath)
-
-    def cmd_cd_index(self, dir_):
-        if os.path.isdir(dir_):
-            self.indexPath = dir_
-
-    def cmd_update(self):
-        gt = GeneralTools()
-        fs = FolderStatus(self.folderPath, self.indexPath, gt)
-        fs.getAbsPathList()
-        fs.getAllFilesStatus()
-        fs.getAllFoldersStatus()
-        fs.formattingStatus()
-        fs.getChanges()
-        fs.updateStatus()
+import uuid
 
 
 class GeneralTools:
@@ -74,6 +11,7 @@ class GeneralTools:
         self.time = time.time()
         self.allErr = ''
         self.allLog = ''
+        self.get_mac_address()
 
     def err(self, *arg):
         for item in arg:
@@ -172,6 +110,12 @@ class GeneralTools:
             self.err('"%s"是文件夹，不能计算哈希值' % absPath)
             return 'Error!I\'m a folder!'
 
+    def get_mac_address(self):
+        mac = uuid.UUID(int=uuid.getnode()).hex[-12:]
+        mac = ":".join([mac[e:e+2] for e in range(0, 11, 2)])
+        self.mac = mac
+        return self.mac
+
 
 class FolderStatus:
     def __init__(self, path='.\\', indexPath='.FileManagement_Index\\', gt: GeneralTools = GeneralTools()):
@@ -190,23 +134,11 @@ class FolderStatus:
         filePath_List = []
         folderPath_List = [self.path]
 
-        # 遍历所有文件夹，挑出所有文件。
-        # 并挑出所有文件夹，加入到tobeunfold_List中。
-        # 备注：for in的机制是遍历tobeunfold_List直到最后一个对象，所以新加入的文件夹也会被遍历到。
-        for folder in folderPath_List:
-            # 获取文件夹内所有文件和文件夹(此步经常因为没有权限出错)
-            try:
-                listdir_folder = os.listdir(folder)
-            except Exception as e:
-                self.gt.err('遍历文件夹的文件/文件夹列表出错:%s' % e)
-
-            # 将文件和文件夹分类到两个列表
-            for item in listdir_folder:
-                itempath = folder+item
-                if os.path.isfile(itempath):
-                    filePath_List.append(itempath)
-                elif os.path.isdir(itempath):
-                    folderPath_List.append(itempath+'\\')
+        for root, dirs, files in os.walk(self.path):
+            for name in files:
+                filePath_List.append(os.path.join(root, name))
+            for name in dirs:
+                folderPath_List.append(os.path.join(root, name))
 
         # 写入数据
         self.filePath_List = filePath_List
@@ -248,7 +180,7 @@ class FolderStatus:
     def formattingStatus(self):
         self.gt.pr('开始格式化文件夹状态')
         info = {'generatedTime': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()), 'folderAmount': len(self.folderPath_List), 'fileAmount': len(
-            self.filePath_List), 'amountSize': self.amountSize, 'rootAbsPath': os.path.abspath(self.path)}
+            self.filePath_List), 'amountSize': self.amountSize, 'rootAbsPath': os.path.abspath(self.path), 'mac': self.gt.mac}
         formattedStatus = {'status': {
             'info': info, 'folderStatusList': self.folderStatus_List, 'fileStatusList': self.fileStatus_List}}
 
@@ -282,13 +214,14 @@ class FolderStatus:
                 old_fileStatusSet.difference(new_fileStatusSet))
 
             changes = {'rootAbsPath': os.path.abspath(self.path), 'generatedTime': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()), 'foldersAdded': foldersAdded, 'foldersDeleted': foldersDeleted,
-                       'filesAdded': filesAdded, 'filesDeleted': filesDeleted, 'notion': "Update Status."}
+                       'filesAdded': filesAdded, 'filesDeleted': filesDeleted, 'notion': "Update Status.", 'mac': self.gt.mac}
         else:
             changes = {'rootAbsPath': os.path.abspath(self.path), 'generatedTime': time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime()), 'notion': "Initialize."}
+                "%Y-%m-%d %H:%M:%S", time.localtime()), 'notion': "Initialize.", 'mac': self.gt.mac}
 
         self.changes = changes
 
+    # 更新信息
     def updateStatus(self):
         if not os.path.isdir(self.indexPath):
             os.makedirs(self.indexPath)
@@ -304,6 +237,7 @@ class FolderStatus:
         else:
             self.gt.writeYml([self.changes], self.historyPath)
 
+    # 代码测试中!!!
     def showChangedFolder(self, changedFiles: set, folderAdded: set, folderDeleted: set, maxDeep: int = 3):
         # 逐级展示文件夹变动
         for deep in range(1, maxDeep+1):
@@ -349,6 +283,65 @@ class FolderStatus:
                 print(head+item)
         else:
             print('', end='')
+
+
+class CommandExecute:
+    def __init__(self, gt: GeneralTools = GeneralTools()):
+        self.folderPath = '.'
+        self.indexPath = '.fileManagement_Index'
+        self.gt = gt
+
+    def cmd_help(self):
+        print('''
+        help                    打开帮助
+        update                  初始化/更新索引信息
+        exit                    退出
+        cd [路径]               改变当前目录
+        ''')
+
+    def cmd_cd(self, dir_):
+        self.folderPath = self.gt.pathJoin(dir_, self.folderPath)
+
+    def cmd_update(self):
+        fs = FolderStatus(self.folderPath, self.indexPath, self.gt)
+        fs.getAbsPathList()
+        fs.getAllFilesStatus()
+        fs.getAllFoldersStatus()
+        fs.formattingStatus()
+        fs.getChanges()
+        fs.updateStatus()
+
+
+def main():
+    gt = GeneralTools()
+    ce = CommandExecute(gt)
+    while 1:
+        print()
+        print('请输入指令(输入指令“help”获取帮助)' % ce.indexPath)
+        inputStr = input('%s>' % os.path.abspath(ce.folderPath))
+        inputArgs = inputStr.split(' ')
+        if inputArgs[0] == 'help':
+            ce.cmd_help()
+        elif inputArgs[0] == 'update':
+            ce.cmd_update()
+        elif inputArgs[0] == 'cd':
+            ce.cmd_cd(inputArgs[1])
+        elif inputArgs[0] == 'exit':
+            exit()
+        elif inputArgs[0] == 'check':
+            pass
+        elif inputArgs[0] == 'history':
+            pass
+        elif inputArgs[0] == 'domain_init':
+            pass
+        elif inputArgs[0] == 'package_init':
+            pass
+        elif inputArgs[0] == 'domain_backup':
+            pass
+        elif inputArgs[0] == 'domain_environment':
+            pass
+        else:
+            print('指令错误(输入指令“help”获取帮助)')
 
 
 if __name__ == '__main__':
