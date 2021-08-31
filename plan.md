@@ -1,0 +1,3 @@
+- [ ] 我之前是用hash做文件名-然后文件结构放在db
+- [ ] hashignore 忽略掉index文件夹以及带有index的文件夹
+- [ ] 

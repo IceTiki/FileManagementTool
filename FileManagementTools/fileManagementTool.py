@@ -317,7 +317,7 @@ def main():
     ce = CommandExecute(gt)
     while 1:
         print()
-        print('请输入指令(输入指令“help”获取帮助)' % ce.indexPath)
+        print('请输入指令(输入“help”获取帮助)' % ce.indexPath)
         inputStr = input('%s>' % os.path.abspath(ce.folderPath))
         inputArgs = inputStr.split(' ')
         if inputArgs[0] == 'help':
@@ -328,6 +328,8 @@ def main():
             ce.cmd_cd(inputArgs[1])
         elif inputArgs[0] == 'exit':
             exit()
+        elif inputArgs[0] == 'quick_update':
+            pass
         elif inputArgs[0] == 'check':
             pass
         elif inputArgs[0] == 'history':
