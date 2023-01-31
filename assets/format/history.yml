@@ -1,0 +1,30 @@
+# 初始化记录
+- generatedTime: '2021-08-16 11:03:56' # 生成时间
+  mac: e2:9e:c1:0c:95:db # 设备mac
+  notion: Initialize. # 初始化
+  rootAbsPath: C:\Users\Tiki_\Desktop\工作区\FileManagementTool # 文件夹的绝对路径
+# 记录第一次检查时，发现的文件和文件夹修改
+- filesAdded: # 新增文件
+  - .fileManagement_Index\history.yml|-|1a29ca0240441baaa9809e5d18d579242234b3ca33e278b2b85650ffdb64f287|-|157
+  - .fileManagement_Index\status.yml|-|b7fd8bfc853f6a76173550975923e1f4e6346af1ecfa71635c3bbbe709d47563|-|4922
+  filesDeleted: [] # 删除文件
+  foldersAdded: # 新增文件夹
+  - .fileManagement_Index
+  foldersDeleted: [] # 删除文件夹
+  generatedTime: '2021-08-16 11:04:34'
+  mac: e2:9e:c1:0c:95:db
+  notion: Update Status. # 更新status.yml
+  rootAbsPath: C:\Users\Tiki_\Desktop\工作区\FileManagementTool
+# 记录第二次检查时，发现的文件和文件夹修改
+- filesAdded:
+  - .fileManagement_Index\status.yml|-|df0e31a6b631e6a25a933509a5e2e7e184664ca57edc5882b6951367e29e5ce9|-|5173
+  - .fileManagement_Index\history.yml|-|3023c3baf3d6c2520553965075e3d77b26b6fafd3edc60909443cffdf2355ccf|-|642
+  filesDeleted:
+  - .fileManagement_Index\history.yml|-|1a29ca0240441baaa9809e5d18d579242234b3ca33e278b2b85650ffdb64f287|-|157
+  - .fileManagement_Index\status.yml|-|b7fd8bfc853f6a76173550975923e1f4e6346af1ecfa71635c3bbbe709d47563|-|4922
+  foldersAdded: []
+  foldersDeleted: []
+  generatedTime: '2021-08-16 11:04:36'
+  mac: e2:9e:c1:0c:95:db
+  notion: Update Status.
+  rootAbsPath: C:\Users\Tiki_\Desktop\工作区\FileManagementTool

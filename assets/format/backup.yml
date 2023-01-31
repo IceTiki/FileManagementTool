@@ -1,0 +1,8 @@
+regularExpressionList:
+# 从上到下逐一执行以下表达式
+  - 
+    regularExpression: # 正则表达式。当表达式**完全匹配**到文件时，将该文件的备份的生命周期设为lifetime的值。
+    needen: # 需要加密吗
+    sort: 0 # 分装(0:)
+    lifetime:  # -1:增量备份,打包增加的文件以及history.yml|0:不备份|正数:备份年限
+    # 增量备份是

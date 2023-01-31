@@ -1,7 +1,0 @@
-fileManagement_version: '' # 文件管理的版本
-title: '' # 标题
-description: '' # 对此区域的描述
-creator: '' # 创建者(邮箱)
-created_time: '' # 创建时间
-uuid: '' # 识别号
-exid: '' # 128位16进制(小写字母)随机字符串，识别号创建/改变时随机生成
