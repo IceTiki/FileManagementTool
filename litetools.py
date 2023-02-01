@@ -405,6 +405,9 @@ class ProcessStatus:
         '''重写旧句子(似乎只支持ascii)'''
         msg = str(msg)
         old_msg_len = len(self.old_msg)
+        for letter in self.old_msg:  # 检测长宽度中文字符
+            if (letter >= '\u4e00' and letter <= '\u9fa5') or letter in ['；', '：', '，', '（', '）', '！', '？', '—', '…', '、', '》', '《']:
+                old_msg_len += 1
         clean = "\b"*old_msg_len + " "*old_msg_len + "\b" * old_msg_len  # 清除上一帧进度条
         print(clean+msg, end="", flush=True)
         self.old_msg = msg

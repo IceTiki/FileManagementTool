@@ -2,6 +2,8 @@ import os
 import time
 import re
 import typing
+import random
+import shutil
 from litetools import YamlRW, Hash, FileOut, System, ProcessStatus, Decorators
 
 if True:
@@ -64,10 +66,6 @@ class FolderStatus:
         eprint("数据初始化完成")
 
     @property
-    def code_directory(self):
-        return os.path.dirname(__file__)
-
-    @property
     def formatted_status(self):
         '''格式化获取到的文件夹状态'''
         eprint('开始格式化文件夹状态')
@@ -112,8 +110,8 @@ class FolderStatus:
         '''
         set_old = set(list_old)
         set_new = set(list_new)
-        added = set_new.difference(set_new)
-        deleted = set_old.difference(set_old)
+        added = set_new.difference(set_old)
+        deleted = set_old.difference(set_new)
         added, deleted = list(added), list(deleted)
         added.sort()
         deleted.sort()
@@ -129,66 +127,98 @@ class FolderStatus:
             os.makedirs(folder_dir)
         YamlRW.write({
             "status": self.formatted_status,
-            "history": [],
-            "data_format_version": "1.0.0",
+            "meta": {
+                "version": "1.0.0",
+            }
         }, file_dir)
-        return
 
-    def update_data(self, file_dir: str = None, only_scan_and_print=False):
+    def history_init(self, history_dir: str = None):
+        '''
+        保证「历史变更数据」文件存在, 如果不存在则初始化一个
+        '''
+        history_folder_dir = os.path.dirname(history_dir)
+        if not os.path.isdir(history_folder_dir):
+            os.makedirs(history_folder_dir)
+        if not os.path.isfile(history_dir):
+            YamlRW.write({
+                "history": [],
+                "meta": {
+                    "version": "1.0.0",
+                }
+            }, history_dir)
+
+    def update_data(self, data_dir: str = None, history_dir: str = None, only_scan_and_print=False):
         '''
         更新yaml文件中的数据
-        :param file_dir: 数据文件位置
+        :param data_dir: 数据文件位置
+        :param history_dir: 历史变化记录数据
         :param only_scan_and_print: (bool)如果为True, 则仅扫描变化并输出, 不更新文件(但如果没有相应的数据文件, 还是会创建并保存)
         '''
         eprint("即将更新yaml中的数据")
-        if not os.path.isfile(file_dir):
-            eprint(f"「{file_dir}」不存在, 正在新建文件并保存")
-            self.save_data(file_dir)
-            eprint("保存完毕")
+        if not os.path.isfile(history_dir):
+            eprint(f"「{history_dir}」不存在, 正在创建")
+            self.history_init(history_dir)
+            eprint("创建完毕")
+        if not os.path.isfile(data_dir):
+            eprint(f"「{data_dir}」不存在, 正在创建")
+            self.save_data(data_dir)
+            eprint("创建完毕")
             return
         # 载入数据
         eprint("正在载入数据")
-        history_data = YamlRW.load(file_dir)
-        history_status = history_data["status"]
-        history_history = history_data["history"]
+        old_data = YamlRW.load(data_dir)
+        old_status = old_data["status"]
         new_status = self.formatted_status
         # 扫描文件夹变化
         eprint("正在扫描文件夹变化")
         file_deleted, file_added = self.list_difference(
-            history_status["files"], new_status["files"])
+            old_status["files"], new_status["files"])
         folder_deleted, folder_added = self.list_difference(
-            history_status["folders"], new_status["folders"])
+            old_status["folders"], new_status["folders"])
         eprint("正在格式化数据")
-        # 格式化文件变化
-        format_changes = {'folder_path': os.path.abspath(self.path),
+        format_status_data = {
+            "status": self.formatted_status,
+            "meta": {
+                "version": "1.0.0",
+            }
+        }
+        # 输出
+        if only_scan_and_print:
+            print(f"="*20)
+            print("\n".join([f"- {i}" for i in folder_deleted]))
+            print("\n".join([f"+ {i}" for i in folder_added]))
+            print("\n".join([f"- {i}" for i in file_deleted]))
+            print("\n".join([f"+ {i}" for i in file_added]))
+            print(f"="*20)
+            return
+        # 更新status数据文件
+        eprint(f"正在更新状态文件「{data_dir}」")
+        YamlRW.write(format_status_data, data_dir)
+        eprint("更新完成")
+        # 更新history数据文件
+        eprint(f"正在记录变更「{history_dir}」")
+        format_changes = {'folder_path': os.path.abspath(self.folder_path),
                           'generated_time': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
                           'file_deleted': file_deleted,
                           'file_added': file_added,
                           'folder_deleted': folder_deleted,
                           'folder_added': folder_added,
-                          'notion': "",
+                          'notion': "auto log",
                           'mac': System.get_mac_address()}
-        format_data = {
-            "status": new_status,
-            "history": history_history + [format_changes]
-        }
-        # 输出
-        if not only_scan_and_print:
-            eprint("正在更新数据")
-            YamlRW.write(format_data, file_dir)
-            eprint("更新数据完成")
-        print(f"="*20)
-        print("\n".join([f"- {i}" for i in folder_deleted]))
-        print("\n".join([f"+ {i}" for i in folder_added]))
-        print("\n".join([f"- {i}" for i in file_deleted]))
-        print("\n".join([f"+ {i}" for i in file_added]))
-        print(f"="*20)
+        old_history = YamlRW.load(history_dir)
+        old_history["history"].append(format_changes)
+        YamlRW.write(old_history, history_dir)
+        eprint("记录完成")
 
-class Tikicmd:
+
+class FMcmd:
     all_commands: dict = {}
 
     def __init__(self):
         pass
+
+    def repository_assets(self, filename: str):
+        return os.path.join(os.path.dirname(__file__), "assets", filename)
 
     @property
     def work_dir(self):
@@ -295,86 +325,78 @@ class Tikicmd:
     def cd(self, content):
         os.chdir(content)
 
-# class CommandExecute:
-#     def __init__(self, gt: GeneralTools = GeneralTools()):
-#         self.folderPath = '.'
-#         self.indexPath = '.fileManagement_Index'
-#         self.gt = gt
+    @set_command(command="edit", document="编辑tikifm")
+    def edit(self, content):
+        os.startfile(__file__)
 
-#     def cmd_help(self):
-#         print('''help                    打开帮助
-# update                  初始化/更新索引信息
-# exit                    退出
-# cd [路径]               改变当前目录
-# obj_init                **测试功能**''')
+    # ====================附加命令====================
 
-#     def cmd_cd(self, dir_):
-#         self.folderPath = self.gt.pathJoin(dir_, self.folderPath)
+    # @set_command(command="command", document="document")
+    # def f(self, content):
+    #     pass
 
-#     def cmd_update(self):
-#         fs = FolderStatus(self.folderPath, self.indexPath, self.gt)
-#         fs.getAbsPathList()
-#         fs.getAllFilesStatus()
-#         fs.getAllFoldersStatus()
-#         fs.formattingStatus()
-#         fs.getChanges()
-#         fs.updateStatus()
+    @set_command(command="init", document="新建fm对象")
+    def fm_init(self, content):
+        fmo_name = input('请输入对象名\n>')
+        fmo_id_len = input('请输入对象类型(子对象:8|可变对象:12|不可变对象:16)\n>')
+        fm_ver = "1.1.0"
+        # 生成基本信息
+        fmo_id = str().join(random.choices(
+            '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', k=int(fmo_id_len)))
+        fmo_exid = str().join(random.choices(
+            '0123456789abcdef', k=128))
+        fmo_dir = System.path_join(f"{fmo_name}_{fmo_id}", self.work_dir)
+        fmo_inx_dir = os.path.join(fmo_dir, f'.fmi_{fmo_id}')
+        fmo_created_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
 
-#     def cmd_obj_init(self):
-#         name = input('请输入对象名\n>')
-#         objIdlen = input('请输入对象类型(子对象:8|可变对象:12|不可变对象:16)\n>')
-#         fm_ver = input('请输入文件管理版本\n>')
-#         objId = str().join(random.choices(
-#             '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', k=int(objIdlen)))
-#         objexId = str().join(random.choices(
-#             '0123456789abcdef', k=128))
-#         obj_path = self.gt.pathJoin('%s_%s' % (name, objId), self.folderPath)
-#         ftime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-#         os.makedirs(obj_path)
-#         os.makedirs(obj_path+'\\.fileManagement_Index')
-#         indexstr = f"fileManagement_version: '{fm_ver}' # 文件管理的版本\ntitle: '{name}' # 标题\ndescription: '' # 对此区域的描述\ncreator: '' # 创建者(邮箱)\ncreated_time: '{ftime}' # 创建时间(格式 YYYY-MM-DD HH:MM:SS)\nuuid: '{objId}' # 识别号\nexid: '{objexId}' # 128位16进制(小写字母)随机字符串，识别号创建/改变时随机生成"
-#         self.gt.writefile(
-#             obj_path+'\\.fileManagement_Index\\index.yml', indexstr)
-#         tag_liststr = self.gt.readfile('./format/tag_list.yml')
-#         self.gt.writefile(
-#             obj_path+'\\.fileManagement_Index\\tag_list.yml', tag_liststr)
-#         tag_exstr = self.gt.readfile('./format/tag_extension.yml')
-#         self.gt.writefile(
-#             obj_path+'\\.fileManagement_Index\\tag_extension.yml', tag_exstr)
+        os.makedirs(fmo_inx_dir)
 
+        file_index_content = f"""file_management_version: '{fm_ver}' # 文件管理的版本
+title: '{fmo_name}' # 标题
+description: '' # 对此区域的描述
+creator: '' # 创建者(推荐填邮箱)
+created_time: '{fmo_created_time}' # 创建时间(格式 YYYY-MM-DD HH:MM:SS)
+id: '{fmo_id}' # 对象识别号
+status_id: '{fmo_exid}' # 对象状态识别号——128位16进制(小写字母)随机字符串，在创建/更新对象时随机生成"""
+        with open(os.path.join(fmo_inx_dir, "index.yml"), "w", encoding="utf-8") as f:
+            f.write(file_index_content)
 
-# def main():
-#     gt = GeneralTools()
-#     ce = CommandExecute(gt)
+        shutil.copy2(self.repository_assets(
+            "file_management_index_folder_template\\tag_list.yml"), os.path.join(fmo_inx_dir, "tag_list.yml"))
+        shutil.copy2(self.repository_assets("file_management_index_folder_template\\tag_extension.yml"),
+                     os.path.join(fmo_inx_dir, "tag_extension.yml"))
 
-#     ce.cmd_cd("D:\Domain")  # 临时性修改!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#     while 1:
-#         print('请输入指令(输入“help”获取帮助)')
-#         inputStr = input('%s>' % os.path.abspath(ce.folderPath))
-#         inputArgs = inputStr.split(' ')
-#         if inputArgs[0] == 'help':
-#             ce.cmd_help()
-#         elif inputArgs[0] == 'update':
-#             ce.cmd_update()
-#         elif inputArgs[0] == 'cd':
-#             ce.cmd_cd(inputArgs[1])
-#         elif inputArgs[0] == 'exit':
-#             exit()
-#         elif inputArgs[0] == 'quick_update':
-#             pass
-#         elif inputArgs[0] == 'check':
-#             pass
-#         elif inputArgs[0] == 'history':
-#             pass
-#         elif inputArgs[0] == 'obj_init':
-#             ce.cmd_obj_init()
-#         elif inputArgs[0] == 'domain_backup':
-#             pass
-#         elif inputArgs[0] == 'domain_environment':
-#             pass
-#         else:
-            # print('指令错误(输入指令“help”获取帮助)')
+        fs = FolderStatus(fmo_dir)
+        fs.update_data(data_dir=os.path.join(fmo_inx_dir, "status.yml"),
+                       history_dir=os.path.join(fmo_inx_dir, "history.yml"))
+        eprint("创建完成")
+
+    @set_command(command="update", document="更新fm对象")
+    def fm_update(self, content):
+        fs = FolderStatus(self.work_dir)
+        for i in os.listdir():
+            if re.match(r"^.*\.fmi_[\da-zA-Z]+$", i):
+                fmo_inx_dir = i
+                break
+        else:
+            eprint("出错了!!!未能找到索引文件夹")
+        eprint("找到索引文件夹「{fmo_inx_dir}」")
+        fs.update_data(data_dir=os.path.join(fmo_inx_dir, "status.yml"),
+                       history_dir=os.path.join(fmo_inx_dir, "history.yml"))
+
+    @set_command(command="scan", document="检查fm对象变动")
+    def fm_scan(self, content):
+        fs = FolderStatus(self.work_dir)
+        for i in os.listdir():
+            if re.match(r"^.*\.fmi_[\da-zA-Z]+$", i):
+                fmo_inx_dir = i
+                break
+        else:
+            eprint("出错了!!!未能找到索引文件夹")
+        eprint("找到索引文件夹「{fmo_inx_dir}」")
+        fs.update_data(data_dir=os.path.join(fmo_inx_dir, "status.yml"),
+                       history_dir=os.path.join(fmo_inx_dir, "history.yml"), only_scan_and_print=True)
 
 
-nfs = FolderStatus(r"D:\Domain\Collection_MCfWXEVByGyk")
-nfs.update_data(r"C:\Users\Tiki_\Desktop\tmp.yml")
+cmd = FMcmd()
+cmd.start()
