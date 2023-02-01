@@ -211,6 +211,107 @@ class FolderStatus:
         eprint("记录完成")
 
 
+class AutoUpdate:
+    '''半成品, 用于更新旧版的idx'''
+
+    def __init__(self, folder_path=".\\"):
+        self.folder_path = folder_path
+        for path in os.listdir(folder_path):
+            if re.match(r"^.*\.fileManagement_Index[\\\/]?$", path):
+                self.version = "alpha"
+                self.idx_path = path
+                self.alpha_update()
+                break
+
+    def idx_item(self, path):
+        '''基于索引文件夹的路径, 获取内部文件的路径'''
+        return os.path.join(self.idx_path, path)
+
+    def alpha_update(self):
+        # index
+        def index_replace(match: re.Match):
+            if match.group() == "fileManagement_version":
+                return "file_management_version"
+            elif match.group() == "uuid":
+                return "id"
+            elif match.group() == "exid":
+                return "status_id"
+            else:
+                return match.group()
+
+        def index_replace2(match: re.Match):
+            if match.group(2) == "创建者(邮箱)":
+                return match.group(1)+"创建者"
+            elif match.group(2) == "识别号":
+                return match.group(1)+"对象识别号"
+            elif match.group(2) == "128位16进制(小写字母)随机字符串，识别号创建/改变时随机生成":
+                return match.group(1)+"对象状态识别号——128位16进制(小写字母)随机字符串，在创建/更新对象时随机生成"
+            else:
+                return match.group()
+
+        with open(self.idx_item("index.yml"), "r", encoding="utf-8") as f:
+            text = f.read()
+            text = text.replace("fileManagement_version: '1.0.0'",
+                                "file_management_version: '1.0.0-beta'")
+            text = re.sub(r"^\w*", index_replace, text, flags=re.M)
+            text = re.sub(r"(# )(.*)$", index_replace2, text, flags=re.M)
+        with open(self.idx_item("index.yml"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+        # status
+        status_path = self.idx_item("status.yml")
+        if os.path.isfile(status_path):
+            old_data = YamlRW.load(status_path)
+            old_data_info = old_data["status"]["info"]
+            new_data = {
+                "meta": {
+                    "version": "1.0.0",
+                },
+                "status": {
+                    "abstract": {
+                        'generated_time': old_data_info["generatedTime"],
+                        'folder_amount': old_data_info["folderAmount"],
+                        'file_amount': old_data_info["fileAmount"],
+                        'folder_size': old_data_info["amountSize"],
+                        'folder_path': old_data_info["rootAbsPath"],
+                        'mac_address': old_data_info["mac"],
+                    },
+                    "files": old_data["status"]["fileStatusList"],
+                    "folders": old_data["status"]["folderStatusList"],
+                },
+            }
+            YamlRW.write(new_data, status_path)
+
+        # history
+        history_path = self.idx_item("history.yml")
+        if os.path.isfile(history_path):
+            old_data = YamlRW.load(history_path)
+            old_data_history = [{
+                "file_added": i.get("filesAdded", []),
+                "file_deleted": i.get("filesDeleted", []),
+                "folder_added": i.get("foldersAdded", []),
+                "folder_deleted": i.get("foldersDeleted", []),
+                "folder_path": i["rootAbsPath"],
+                "generated_time": i["generatedTime"],
+                "mac": i["mac"],
+                "notion": i["notion"],
+            } for i in old_data]
+            new_data = {
+                "meta": {"version": "1.0.0", },
+                "history": old_data_history
+            }
+            YamlRW.write(new_data, history_path)
+
+        # 文件夹改名
+        idx_data = YamlRW.load(self.idx_item("index.yml"))
+        self.idx_path = os.path.normpath(self.idx_path)
+        new_idx_name = f".fmi_{idx_data['id']}"
+        new_idx_name = os.path.join(
+            os.path.dirname(self.idx_path), new_idx_name)
+        os.rename(self.idx_path, new_idx_name)
+        self.idx_path = new_idx_name
+
+
 class FMcmd:
     all_commands: dict = {}
 
@@ -339,7 +440,8 @@ class FMcmd:
     def fm_init(self, content):
         fmo_name = input('请输入对象名\n>')
         fmo_id_len = input('请输入对象类型(子对象:8|可变对象:12|不可变对象:16)\n>')
-        fm_ver = "1.1.0"
+        fm_ver = "1.0.0-beta"
+        print('fm_ver: 1.0.0-beta')
         # 生成基本信息
         fmo_id = str().join(random.choices(
             '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', k=int(fmo_id_len)))
@@ -354,7 +456,7 @@ class FMcmd:
         file_index_content = f"""file_management_version: '{fm_ver}' # 文件管理的版本
 title: '{fmo_name}' # 标题
 description: '' # 对此区域的描述
-creator: '' # 创建者(推荐填邮箱)
+creator: '' # 创建者
 created_time: '{fmo_created_time}' # 创建时间(格式 YYYY-MM-DD HH:MM:SS)
 id: '{fmo_id}' # 对象识别号
 status_id: '{fmo_exid}' # 对象状态识别号——128位16进制(小写字母)随机字符串，在创建/更新对象时随机生成"""
@@ -397,6 +499,11 @@ status_id: '{fmo_exid}' # 对象状态识别号——128位16进制(小写字母
         fs.update_data(data_dir=os.path.join(fmo_inx_dir, "status.yml"),
                        history_dir=os.path.join(fmo_inx_dir, "history.yml"), only_scan_and_print=True)
 
+    @set_command(command="test", document="测试")
+    def test(self, content):
+        au = AutoUpdate(self.work_dir)
 
-cmd = FMcmd()
-cmd.start()
+
+if __name__ == "__main__":
+    cmd = FMcmd()
+    cmd.start()
