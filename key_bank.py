@@ -7,7 +7,7 @@ import yaml
 import re
 
 
-class Lite_AesStringCrypto:
+class StandardAesStringCrypto:
     def __init__(self, secret_key: str):
         """
         :param secret_key: 密钥
@@ -58,7 +58,7 @@ class GT:
         if str_ == None:
             with open(path, 'r', encoding='utf-8') as f:
                 str_ = f.read()
-        decrypto_str = Lite_AesStringCrypto(password).decrypt(str_)
+        decrypto_str = StandardAesStringCrypto(password).decrypt(str_)
         if writeIn:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(decrypto_str)
@@ -69,7 +69,7 @@ class GT:
         if str_ == None:
             with open(path, 'r', encoding='utf-8') as f:
                 str_ = f.read()
-        encrypto_str = Lite_AesStringCrypto(password).encrypt(str_)
+        encrypto_str = StandardAesStringCrypto(password).encrypt(str_)
         if writeIn:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(encrypto_str)

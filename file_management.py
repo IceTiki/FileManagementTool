@@ -26,9 +26,9 @@ class FolderStatus:
         '''
         self.folder_path = os.path.abspath(folder_path)
         ps = ProcessStatus()
-        eprint("正在初始化数据")
+        eprint("初始化数据: ", end="")
         # 文件和文件夹扫描
-        ps.rewritemsg("scan(>>>)hash(...)")
+        ps.rewritemsg("扫描文件夹(>>>)计算哈希值(...)")
         filepaths, folder_paths = System.dir_traversing(self.folder_path)
         filepaths.sort()
         folder_paths.sort()
@@ -52,18 +52,21 @@ class FolderStatus:
         self.folder_size = sum((i["size"] for i in self.files_data))
         progress_count = 0
         progress_size = 0
+        last_print_time = time.time()
         # 计算sha256
+        ps.rewritemsg("扫描文件夹(done)计算哈希值(>>>)")
         for file in self.files_data:
             progress_count += 1
             progress_size += file["size"]
             path = file["abspath"]
             file["sha256"] = self.file_sha256(path)
             # 进度条
-            if progress_count % 100 == 0:
+            if time.time() - last_print_time > 1:
+                last_print_time = time.time()
                 ps.rewritemsg(
-                    f"scan(done)hash({progress_count}/{self.file_amount}|{round(progress_size/self.folder_size*100,2 )}%)")
-        ps.rewritemsg()
-        eprint("数据初始化完成")
+                    f"扫描文件夹(done)计算哈希值({progress_count}/{self.file_amount}|{round(progress_size/self.folder_size*100,2 )}%)")
+        ps.rewritemsg("扫描文件夹(done)计算哈希值(done)")
+        eprint("初始化数据完成")
 
     @property
     def formatted_status(self):
@@ -499,7 +502,7 @@ status_id: '{fmo_exid}' # 对象状态识别号——128位16进制(小写字母
         fs.update_data(data_dir=os.path.join(fmo_inx_dir, "status.yml"),
                        history_dir=os.path.join(fmo_inx_dir, "history.yml"), only_scan_and_print=True)
 
-    @set_command(command="test", document="测试")
+    @set_command(command="test_update", document="[测试功能]将本文件夹的fmi更新")
     def test(self, content):
         au = AutoUpdate(self.work_dir)
 
