@@ -9,6 +9,10 @@ from litetools import YamlRW, Hash, FileOut, System, ProcessStatus, Decorators
 if True:
     start_time = time.time()
 
+    def runtime():
+        """返回运行时间"""
+        return time.time() - start_time
+
     def eprint(msg, *args, **kwargs):
         """带时间的print"""
         kwargs.setdefault("flush", True)

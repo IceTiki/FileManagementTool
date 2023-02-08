@@ -8,6 +8,7 @@ import sys
 from io import TextIOWrapper
 import uuid
 import time
+
 # 第三方库
 import yaml as _yaml  # pyyaml
 import py7zr  # py7zr
@@ -22,15 +23,17 @@ class Decorators:
                 func(*args, **kwargs)
             except Exception as e:
                 print(traceback.format_exc())
+
         return new_func
 
 
 class FileOut:
-    '''
+    """
     代替stdout和stderr, 使print同时输出到文件和终端中。
     start()方法可以直接用自身(self)替换stdout和stderr
     close()方法可以还原stdout和stderr
-    '''
+    """
+
     stdout = sys.stdout
     stderr = sys.stderr
     log: str = ""  # 同时将所有输出记录到log字符串中
@@ -39,10 +42,10 @@ class FileOut:
 
     @classmethod
     def setFileOut(cla, path: str = None):
-        '''
+        """
         设置日志输出文件
         :params path: 日志输出文件路径, 如果为空则取消日志文件输出
-        '''
+        """
         # 关闭旧文件
         if cla.logFile:
             cla.logFile.close()
@@ -69,7 +72,7 @@ class FileOut:
 
     @classmethod
     def start(cla):
-        '''开始替换stdout和stderr'''
+        """开始替换stdout和stderr"""
         if type(sys.stdout) != cla and type(sys.stderr) != cla:
             sys.stdout = cla
             sys.stderr = cla
@@ -78,10 +81,10 @@ class FileOut:
 
     @classmethod
     def write(cla, str_):
-        r'''
+        r"""
         :params str: print传来的字符串
         :print(s)等价于sys.stdout.write(s+"\n")
-        '''
+        """
         str_ = str(str_)
         cla.log += str_
         if cla.logFile:
@@ -91,14 +94,14 @@ class FileOut:
 
     @classmethod
     def flush(cla):
-        '''刷新缓冲区'''
+        """刷新缓冲区"""
         cla.stdout.flush()
         if cla.logFile:
             cla.logFile.flush()
 
     @classmethod
     def close(cla):
-        '''关闭'''
+        """关闭"""
         if cla.logFile:
             cla.logFile.close()
         cla.log = ""
@@ -107,10 +110,11 @@ class FileOut:
 
 
 class System:
-    '''独立函数'''
+    """独立函数"""
+
     @staticmethod
     def dir_traversing(path):
-        '''输入路径，层次遍历返回文件和文件夹的绝对路径列表'''
+        """输入路径，层次遍历返回文件和文件夹的绝对路径列表"""
         fileList = []
         folderlist = []
         for root, dirs, files in os.walk(path, topdown=False):
@@ -131,15 +135,17 @@ class System:
     @staticmethod
     def get_mac_address():
         mac = uuid.UUID(int=uuid.getnode()).hex[-12:]
-        mac = ":".join([mac[e:e+2] for e in range(0, 11, 2)])
+        mac = ":".join([mac[e : e + 2] for e in range(0, 11, 2)])
         return mac
 
     @staticmethod
     def path_join(path, start_path):
-        '''相对路径转绝对路径(相对稳定, 测试中, 半成品)(os模块中, 无法拼接相对路径和其他盘符的绝对路径)'''  # TODO
+        """相对路径转绝对路径(相对稳定, 测试中, 半成品)(os模块中, 无法拼接相对路径和其他盘符的绝对路径)"""  # TODO
         # 检查是否为路径
-        if not (os.path.isdir(path) or os.path.isdir(start_path) or os.path.isfile(path)):
-            raise Exception('error!')
+        if not (
+            os.path.isdir(path) or os.path.isdir(start_path) or os.path.isfile(path)
+        ):
+            raise Exception("error!")
         # 检查起点是否为文件，是：取其目录
         if os.path.isfile(start_path):
             start_path = os.path.dirname(start_path)
@@ -152,20 +158,20 @@ class System:
         path = os.path.normpath(path)
 
         # 检查是否没有追溯上层目录
-        for c in path.split('\\')[0]:
-            if c != '.':
-                return start_path+'\\'+path
+        for c in path.split("\\")[0]:
+            if c != ".":
+                return start_path + "\\" + path
 
         # 追溯上层目录
-        path_split = path.split('\\', 1)
-        start_path = start_path.split('\\')
+        path_split = path.split("\\", 1)
+        start_path = start_path.split("\\")
         backTimes = len(path_split[0])  # 统计点的数量
         if backTimes > len(start_path):
-            raise Exception('error!')
+            raise Exception("error!")
         else:
-            relpath_ = ''
-            for i in range(len(start_path)-backTimes+1):
-                relpath_ += start_path[i]+'\\'
+            relpath_ = ""
+            for i in range(len(start_path) - backTimes + 1):
+                relpath_ += start_path[i] + "\\"
             if len(path_split) == 1:
                 return os.path.normpath(relpath_)
             else:
@@ -175,29 +181,29 @@ class System:
 
 class YamlRW:
     @staticmethod
-    def load(ymlFile='data.yml', encoding="utf-8"):
-        '''读取Yaml文件'''
-        with open(ymlFile, 'r', encoding=encoding) as f:
+    def load(ymlFile="data.yml", encoding="utf-8"):
+        """读取Yaml文件"""
+        with open(ymlFile, "r", encoding=encoding) as f:
             return _yaml.load(f, Loader=_yaml.FullLoader)
 
     @staticmethod
-    def write(item, ymlFile='data.yml', encoding="utf-8"):
-        '''写入Yaml文件'''
-        with open(ymlFile, 'w', encoding=encoding) as f:
+    def write(item, ymlFile="data.yml", encoding="utf-8"):
+        """写入Yaml文件"""
+        with open(ymlFile, "w", encoding=encoding) as f:
             _yaml.dump(item, f, allow_unicode=True)
 
 
 class JsonRW:
     @staticmethod
-    def load(jsonFile='data.json', encoding="utf-8"):
-        '''读取Json文件'''
-        with open(jsonFile, 'r', encoding=encoding) as f:
+    def load(jsonFile="data.json", encoding="utf-8"):
+        """读取Json文件"""
+        with open(jsonFile, "r", encoding=encoding) as f:
             return _json.load(f)
 
     @staticmethod
-    def write(item, jsonFile='data.json', encoding="utf-8", ensure_ascii=False):
-        '''写入Json文件'''
-        with open(jsonFile, 'w', encoding=encoding) as f:
+    def write(item, jsonFile="data.json", encoding="utf-8", ensure_ascii=False):
+        """写入Json文件"""
+        with open(jsonFile, "w", encoding=encoding) as f:
             _json.dump(item, f, ensure_ascii=ensure_ascii)
 
     @staticmethod
@@ -209,36 +215,40 @@ class JsonRW:
 class Zip_7z_py7zr:
     @staticmethod
     def decompression(zip_path: str, output_folder: str, password: str = None):
-        '''
+        """
         7z解压
-        '''
+        """
         password = password if password else None
         with py7zr.SevenZipFile(zip_path, password=password, mode="r") as z:
             z.extractall(output_folder)
 
     @staticmethod
     def compression(zip_path: str, input_folder: str, password: str = None):
-        '''
+        """
         7z压缩——默认无压缩。若有密码则使用AES256且加密文件名。
-        '''
+        """
         password = password if password else None
         if password:
             crypyto_kwargs = {
                 "header_encryption": True,
-                "filters": [{'id': py7zr.FILTER_COPY}, {
-                    'id': py7zr.FILTER_CRYPTO_AES256_SHA256}]
+                "filters": [
+                    {"id": py7zr.FILTER_COPY},
+                    {"id": py7zr.FILTER_CRYPTO_AES256_SHA256},
+                ],
             }
         else:
             crypyto_kwargs = {
                 "header_encryption": False,
-                "filters": [{'id': py7zr.FILTER_COPY}]
+                "filters": [{"id": py7zr.FILTER_COPY}],
             }
-        with py7zr.SevenZipFile(zip_path, password=password, mode="w", **crypyto_kwargs) as z:
+        with py7zr.SevenZipFile(
+            zip_path, password=password, mode="w", **crypyto_kwargs
+        ) as z:
             z.writeall(input_folder)
 
     @staticmethod
     def test(zip_path: str, password: str = None):
-        '''测试压缩包中各个文件的CRC值'''
+        """测试压缩包中各个文件的CRC值"""
         password = password if password else None
         with py7zr.SevenZipFile(zip_path, password=password, mode="r") as z:
             return z.test()
@@ -246,6 +256,7 @@ class Zip_7z_py7zr:
 
 class Hash:
     """Hashing String And File"""
+
     @staticmethod
     def geneHashObj(hash_type):
         if hash_type == 1:
@@ -269,7 +280,7 @@ class Hash:
         elif hash_type == 3.512:
             return _hashlib.sha3_512()
         else:
-            raise Exception('类型错误, 初始化失败')
+            raise Exception("类型错误, 初始化失败")
 
     @staticmethod
     def fileHash(path, hash_type):
@@ -294,12 +305,12 @@ class Hash:
                         hashObj.update(byte_block)
                     return hashObj.hexdigest()
             except Exception as e:
-                raise Exception('%s计算哈希出错: %s' % (path, e))
+                raise Exception("%s计算哈希出错: %s" % (path, e))
         else:
             raise Exception('路径错误, 没有指向文件: "%s"')
 
     @staticmethod
-    def strHash(str_: str, hash_type, charset='utf-8'):
+    def strHash(str_: str, hash_type, charset="utf-8"):
         """计算字符串哈希
         :param str_: 字符串
         :param hash_type: 哈希算法类型
@@ -339,7 +350,7 @@ class Hash:
         return hashObj.hexdigest()
 
 
-class SimpleAES_StringCrypto:
+class StandardAesStringCrypto:
     """
     在线加密解密见https://www.ssleye.com/aes_cipher.html
     key: sha256(secret_key)[0:32]
@@ -354,16 +365,13 @@ class SimpleAES_StringCrypto:
         """
         :param secret_key: 密钥
         """
-        self.charset = 'utf-8'
+        self.charset = "utf-8"
 
         hash = _hashlib.sha256()
         hash.update(secret_key.encode(self.charset))
         keyhash = hash.hexdigest()
-
         self.key = keyhash[0:32]
         self.iv = keyhash[32:48]
-        print("AesCrypto initialization successful!\nkey: %s\niv: %s\nmode: CBC\npadding: pkcs7padding\ncharset: %s\nencode: Hex\n----------" %
-              (self.key, self.iv, self.charset))
         self.key = self.key.encode(self.charset)
         self.iv = self.iv.encode(self.charset)
 
