@@ -1,7 +1,5 @@
-import json
 import typing
 import pathlib
-
 
 
 class TagPath(pathlib.Path):
@@ -16,21 +14,6 @@ class TagPath(pathlib.Path):
 
     # type(pathlib.Path())是pathlib.Path根据当前系统判断, 实例化哪种类型的Path
     _flavour = type(pathlib.Path())._flavour
-
-    class TagStringDecodeError(ValueError):
-        """TagString解析错误"""
-
-        def __init__(self, *args: object, position=None, msg=None) -> None:
-            self.position = position
-            if not args:
-                errmsg = "TagString解析错误"
-                if msg is not None:
-                    errmsg += f", {msg}"
-                if position is not None:
-                    errmsg += f", 错误出现在{position}"
-                args = [errmsg]
-
-            super().__init__(*args)
 
     def __new__(cls, string: str | pathlib.Path):
         return super(TagPath, cls).__new__(cls, string)
@@ -49,8 +32,23 @@ class TagPath(pathlib.Path):
     class Decoder:
         TRAN_TAG = set("`#=,{}[]")
         TRAN_C1 = set("\\abnvtrf\"'")
-        TRAN_C3 = set("ox" + "01234567")
+        TRAN_C3 = set("x" + "01234567")
         TRAN_C4 = set("u")
+
+        class TagStringDecodeError(ValueError):
+            """TagString解析错误"""
+
+            def __init__(self, *args: object, position=None, msg=None) -> None:
+                self.position = position
+                if not args:
+                    errmsg = "TagString解析错误"
+                    if msg is not None:
+                        errmsg += f", {msg}"
+                    if position is not None:
+                        errmsg += f", 错误出现在{position}"
+                    args = [errmsg]
+
+                super().__init__(*args)
 
         def __init__(self, string: str) -> None:
             self.__set_string(string)
@@ -130,15 +128,15 @@ class TagPath(pathlib.Path):
                 cursor_add = 3  # 4字符
             else:
                 # 1字符
-                print(
-                    f'WARNING: "{cursor_chara}"->"{cursor_chara}", at {self.__show_cursor_position()}'
-                )
-                return cursor_chara
+                print(f"Warning: invalid escape sequence '\\{cursor_chara}'")
+                return "`" + cursor_chara
 
             slice_start = self.__cursor
             self.__cursor_add(cursor_add)
 
-            return json.loads(f'"\\{self.__string[slice_start:self.__cursor + 1]}"')
+            return f"\\{self.__string[slice_start:self.__cursor + 1]}".encode().decode(
+                "unicode_escape"
+            )
 
         def __catch_string(self, end_chara: str) -> str:
             """
