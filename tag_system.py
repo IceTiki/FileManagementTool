@@ -15,6 +15,23 @@ class TagPath(pathlib.Path):
     # type(pathlib.Path())是pathlib.Path根据当前系统判断, 实例化哪种类型的Path
     _flavour = type(pathlib.Path())._flavour
 
+    @classmethod
+    def from_tag_data(cls, data: list[str | dict]) -> typing.Self:
+        """
+        将列表格式化为TagString字符串
+
+        Notions
+        ---
+        - 列表中的所有字典会合并到同一个字典中, 首层key会被排序
+        - 为避免反复转义, 列表中的所有字符串会被加入到字典中, 键为""(空字符串)的列表中
+
+        Parameters
+        ---
+        list_ : list[str | dict]
+            ...
+        """
+        return cls(cls.Encoder.encode_as_filename_stem(data))
+
     def __new__(cls, string: str | pathlib.Path):
         return super(TagPath, cls).__new__(cls, string)
 
@@ -26,8 +43,27 @@ class TagPath(pathlib.Path):
         return self.tag_data.__iter__()
 
     @property
-    def tag_data(self):
+    def tag_data(self) -> list[str | dict]:
         return self.Decoder(self.stem).resolute()
+
+    @property
+    def formated(self) -> typing.Self:
+        """格式化自身TagString"""
+        tag_data = self.tag_data
+        for i in tag_data:
+            if isinstance(i, dict):
+                break
+        else:
+            # 如果tag_data中没有从TagString中解析出的dict, 那么该字符串不需要梅花
+            return self
+
+        formated_filestem = str(self.from_tag_data(self.tag_data))
+        if self.is_dir():
+            # 如果原路径指向文件夹, 那么pathlib.Path的stem不会用"."划分stem和suffix
+            # 但是格式化后的新路径不一定指向文件夹, 那么其中的"."就会导致stem和suffix错误地被划分
+            # 所以要转义"."
+            formated_filestem = formated_filestem.replace(".", "`x2e")
+        return self.with_stem(formated_filestem)
 
     class Decoder:
         TRAN_TAG = set("`#=,{}[]")
@@ -267,7 +303,7 @@ class TagPath(pathlib.Path):
                         # 字符串类型
                         return self.__catch_string("#")
 
-        def resolute(self) -> list:
+        def resolute(self) -> list[str | dict]:
             """
             解析TagString
             """
@@ -324,3 +360,141 @@ class TagPath(pathlib.Path):
                     self.__init_cursor(self.__cursor)
 
             return result
+
+    class Encoder:
+        @staticmethod
+        def chr_escape(
+            chara: str,
+            tran_chr: str = "`",
+            head_escape: set = set("`#=,{}[]"),
+            save_escape: set = set('\\/:*?"<>|'),
+        ) -> str:
+            """
+            判断字符是否需要转义
+
+            Parameters
+            ---
+            chara : str
+                单个字符
+            tran_chr : str, default = "`"
+                转义字符
+            head_escape : set, default = set("`#=,{}[]")
+                有特殊含义的字符, 需要前面加上转义字符使其表达原义
+            save_escape : set, default = set(r'\/:*?"<>|')
+                不可打印或不安全的字符
+
+            Notes
+            ---
+            https://zh.wikipedia.org/wiki/Unicode%E5%AD%97%E7%AC%A6%E5%88%97%E8%A1%A8
+            Unicode中的不可打印字符:
+            C0: 0~31
+            C1: 128~159
+            127: delete
+            """
+            chara_ord: int = ord(chara)
+            if chara_ord < 32 or (126 < chara_ord < 160):
+                return tran_chr + chara.encode("unicode_escape").decode()[1:]
+            if chara in save_escape:
+                return f"`x{chara_ord:x}"
+            if chara in head_escape:
+                return tran_chr + chara
+            # 无需转义
+            return chara
+
+        @classmethod
+        def encode_string(cls, string: str) -> str:
+            """
+            对字符串特殊字符转义
+
+            Notes
+            ---
+            - 转义字符为"`"
+            - "`#=,{}[]"中的字符会在前面添加转义字符"`_"
+            - 不可打印字符与Windows中无法作为路径名的字符"\\/:*?"<>|"会被转义为"`"与安全字符的组合
+
+            Exameple
+            ---
+            >>> encode_string(r"https://cn.bing.com/##")
+            https`x3a`x2f`x2fcn.bing.com`x2f`#`#
+            """
+            if not isinstance(string, str):
+                print(f"Warning: var string type is {type(string)}")
+                string = str(string)
+            return "".join(map(cls.chr_escape, string))
+
+        @classmethod
+        def encode_as_filename_stem(cls, list_: list[str | dict]):
+            """
+            将列表格式化为TagString字符串
+
+            Notions
+            ---
+            - 列表中的所有字典会合并到同一个字典中, 首层key会被排序
+            - 为避免反复转义, 列表中的所有字符串会被加入到字典中, 键为""(空字符串)的列表中
+
+            Parameters
+            ---
+            list_ : list[str | dict]
+                ...
+            """
+            dict_data = {}
+            for item in list_:
+                match item:
+                    case str():
+                        if "" not in dict_data:
+                            dict_data[""] = []
+                        if not isinstance(dict_data[""], list):
+                            raise ValueError("dictionarys have key''")
+                            # dict_data[""] = [dict_data[""]]
+                        dict_data[""].append(item)
+                    case dict():
+                        if item.keys() & dict_data.keys():
+                            raise ValueError("dictionarys have same key")
+                        dict_data.update(item)
+            dict_data = {k: dict_data[k] for k in sorted(dict_data.keys())}
+            return cls._encode_root_item(dict_data)
+
+        @classmethod
+        def _encode_dict(cls, dictionary: dict) -> str:
+            assert isinstance(dictionary, dict)
+            stem = ",".join(
+                map(
+                    lambda x: f"{cls.encode_string(x[0])}={cls._encode_value(x[1])}",
+                    dictionary.items(),
+                )
+            )
+            return "{" + stem + "}"
+
+        @classmethod
+        def _encode_list(cls, list_: list) -> str:
+            assert isinstance(list_, list)
+            stem = ",".join(map(lambda x: cls._encode_value(x), list_))
+            return f"[{stem}]"
+
+        @classmethod
+        def _encode_value(cls, item: dict | list | str) -> str:
+            match item:
+                case str():
+                    return cls.encode_string(item)
+                case list():
+                    return cls._encode_list(item)
+                case dict():
+                    return cls._encode_dict(item)
+                case _:
+                    raise TypeError(type(item))
+
+        @classmethod
+        def _encode_root_item(cls, item: str | dict):
+            match item:
+                # case str():
+                #     return cls.encode_string(item)
+                case dict():
+                    stem = "#".join(
+                        map(
+                            lambda x: f"{cls.encode_string(x[0])}={cls._encode_value(x[1])}",
+                            item.items(),
+                        )
+                    )
+                    return "#" + stem + "##"
+                case _:
+                    raise ValueError(type(item))
