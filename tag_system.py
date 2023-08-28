@@ -103,11 +103,16 @@ class TagPath(pathlib.Path):
                     position=self.__show_cursor_position(), msg="unexpect char"
                 )
 
-        def __catch_tran(self) -> str:
+        def __catch_tran(self, do_tran: bool = True) -> str:
             """
             转义字符匹配
             开始时指针指向: 转义字符"`"
             结束时指针指向: 转义字符串的最后一个字符
+
+            Parameters
+            ---
+            do_tran : bool, default = True
+                将捕捉到的转义字符串转义
             """
             self.__decode_assert(self.__cursor_chara == "`")
             # 指向转义字符的下一个字符
@@ -118,7 +123,7 @@ class TagPath(pathlib.Path):
             # TagString特殊字符转义
             if cursor_chara in self.TRAN_TAG:
                 # 1字符
-                return cursor_chara
+                return cursor_chara if do_tran else "`" + cursor_chara
             # 其他转义
             elif cursor_chara in self.TRAN_C1:
                 cursor_add = 0  # 1字符
@@ -134,11 +139,16 @@ class TagPath(pathlib.Path):
             slice_start = self.__cursor
             self.__cursor_add(cursor_add)
 
-            return f"\\{self.__string[slice_start:self.__cursor + 1]}".encode().decode(
-                "unicode_escape"
+            tran_slice = self.__string[slice_start : self.__cursor + 1]
+            return (
+                f"\\{tran_slice}".encode().decode("unicode_escape")
+                if do_tran
+                else "`" + tran_slice
             )
 
-        def __catch_string(self, end_chara: str) -> str:
+        def __catch_string(
+            self, end_chara: str, error_chara: set = set(), do_tran: bool = True
+        ) -> str:
             """
             匹配字符串
             开始时指针指向: 字符串的第一个字符字符
@@ -148,6 +158,10 @@ class TagPath(pathlib.Path):
             ---
             end_chara : str
                 结束字符
+            error_chara : set
+                错误字符(遇到该字符则报错, 除非字符被转义豁免)
+            do_tran : bool, default = True
+                是否处理字符串内的转义字符
             """
             result = ""
             self.__cursor_add(0)
@@ -157,9 +171,15 @@ class TagPath(pathlib.Path):
                 # 匹配结束字符
                 if cursor_chara in end_chara:
                     return result
+                # 匹配错误字符
+                if cursor_chara in error_chara:
+                    raise self.TagStringDecodeError(
+                        self.__show_cursor_position(),
+                        msg=f"unexpect char {cursor_chara}",
+                    )
                 # 匹配转义字符(指针会自动跳到转义字符串的最后一个)
                 normal_chara = (
-                    self.__catch_tran() if cursor_chara == "`" else cursor_chara
+                    self.__catch_tran(do_tran) if cursor_chara == "`" else cursor_chara
                 )
 
                 result += normal_chara
@@ -187,7 +207,7 @@ class TagPath(pathlib.Path):
                     self.__cursor_add()
 
                 # 捕捉key
-                key = self.__catch_string("=")
+                key = self.__catch_string("=", set("#,{}[]"))
                 self.__decode_assert(self.__cursor_chara == "=")
 
                 self.__cursor_add()
@@ -199,7 +219,7 @@ class TagPath(pathlib.Path):
                     case "[":
                         value = self.__catch_list()
                     case _:
-                        value = self.__catch_string(",}")
+                        value = self.__catch_string(",}", set("#={[]"))
                 result[key] = value
 
         def __catch_list(self) -> list:
@@ -228,7 +248,7 @@ class TagPath(pathlib.Path):
                     case "[":
                         value = self.__catch_list()
                     case _:
-                        value = self.__catch_string(",]")
+                        value = self.__catch_string(",]", set("#={}["))
                 result.append(value)
 
         def __catch_value(self) -> str | list[typing.Any] | dict[str, typing.Any]:
@@ -276,7 +296,7 @@ class TagPath(pathlib.Path):
 
             while self.__left_limit < self.__length:
                 try:
-                    value = self.__catch_string("#")
+                    value = self.__catch_string("#", do_tran=False)
                     append_result(value)
 
                     self.__decode_assert(self.__cursor_chara == "#")
