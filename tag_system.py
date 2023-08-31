@@ -187,7 +187,7 @@ class TagPath(pathlib.Path):
                 print(e)
                 raise e
 
-        def __catch_tran(self) -> str:
+        def __parse_tran(self) -> str:
             """
             转义字符匹配
             开始时指针指向: 转义字符"`"
@@ -241,7 +241,7 @@ class TagPath(pathlib.Path):
                 # 指针自增
                 self.__cursor_add(do_warning=False)
 
-        def __catch_string(self, end_chara: str, error_chara: set = set()) -> str:
+        def __parse_string(self, end_chara: str, error_chara: set = set()) -> str:
             """
             匹配字符串
             开始时指针指向: 字符串的第一个字符字符
@@ -266,7 +266,7 @@ class TagPath(pathlib.Path):
                 self.__decode_assert(cursor_chara not in error_chara)
                 # 匹配转义字符(指针会自动跳到转义字符串的最后一个)
                 normal_chara = (
-                    self.__catch_tran() if cursor_chara == "`" else cursor_chara
+                    self.__parse_tran() if cursor_chara == "`" else cursor_chara
                 )
 
                 result += normal_chara
@@ -274,7 +274,7 @@ class TagPath(pathlib.Path):
                 # 指针自增
                 self.__cursor_add()
 
-        def __catch_dict(self) -> dict:
+        def __parse_dict(self) -> dict:
             """
             匹配字典
             开始时指针指向: 字典的第一个字符字符
@@ -294,7 +294,7 @@ class TagPath(pathlib.Path):
                     self.__cursor_add()
 
                 # 捕捉key
-                key = self.__catch_string("=", set("#,{}[]"))
+                key = self.__parse_string("=", set("#,{}[]"))
                 self.__decode_assert(self.__cursor_chara == "=")
 
                 self.__cursor_add()
@@ -302,18 +302,18 @@ class TagPath(pathlib.Path):
                 # 捕捉value
                 match self.__cursor_chara:
                     case "{":
-                        value = self.__catch_dict()
+                        value = self.__parse_dict()
                     case "[":
-                        value = self.__catch_list()
+                        value = self.__parse_list()
                     case _:
-                        value = self.__catch_string(",}", set("#={[]"))
+                        value = self.__parse_string(",}", set("#={[]"))
                 if key in result:
                     print(
                         f"Warning: the value {repr(result[key])} of key {repr(key)} has been replaced by {repr(value)}"
                     )
                 result[key] = value
 
-        def __catch_list(self) -> list:
+        def __parse_list(self) -> list:
             """
             匹配列表
             开始时指针指向: 列表的第一个字符字符
@@ -335,14 +335,14 @@ class TagPath(pathlib.Path):
                 # 捕捉value
                 match self.__cursor_chara:
                     case "{":
-                        value = self.__catch_dict()
+                        value = self.__parse_dict()
                     case "[":
-                        value = self.__catch_list()
+                        value = self.__parse_list()
                     case _:
-                        value = self.__catch_string(",]", set("#={}["))
+                        value = self.__parse_string(",]", set("#={}["))
                 result.append(value)
 
-        def __catch_value(self) -> str | list[typing.Any] | dict[str, typing.Any]:
+        def __parse_root_value(self) -> str | list[typing.Any] | dict[str, typing.Any]:
             """
             匹配值
             开始时指针指向: 值的第一个字符字符
@@ -351,18 +351,18 @@ class TagPath(pathlib.Path):
             while True:
                 match self.__cursor_chara:
                     case "{":
-                        value = self.__catch_dict()
+                        value = self.__parse_dict()
                         self.__decode_assert(self.__cursor_chara == "#")
                         return value
                     case "[":
-                        value = self.__catch_list()
+                        value = self.__parse_list()
                         self.__decode_assert(self.__cursor_chara == "#")
                         return value
                     case _:
                         # 字符串类型
-                        return self.__catch_string("#", set(",={}[]"))
+                        return self.__parse_string("#", set(",={}[]"))
 
-        def __catch_tagstring(self):
+        def __parse_tagstring(self):
             result = {}
 
             while True:
@@ -378,12 +378,12 @@ class TagPath(pathlib.Path):
                     return result
 
                 # 捕捉key, 直到指针达到"="
-                key = self.__catch_string("=", set("#,{}[]"))
+                key = self.__parse_string("=", set("#,{}[]"))
                 self.__decode_assert(self.__cursor_chara == "=")
 
                 # 捕捉value, 直到达到"#"
                 self.__cursor_add()
-                value = self.__catch_value()
+                value = self.__parse_root_value()
                 if key in result:
                     print(
                         f"Warning: the value {repr(result[key])} of key '{repr(key)}' has been replaced by {repr(value)}"
@@ -424,7 +424,7 @@ class TagPath(pathlib.Path):
                     append_result(value)
                     self.__init_cursor(self.__cursor)
                     # 尝试解析TagString
-                    value = self.__catch_tagstring()
+                    value = self.__parse_tagstring()
                     append_result(value)
 
                 except self.TagStringDecodeError as e:
@@ -476,7 +476,7 @@ class TagPath(pathlib.Path):
             return chara
 
         @classmethod
-        def encode_string(cls, string: str) -> str:
+        def format_string(cls, string: str) -> str:
             """
             对字符串特殊字符转义
 
@@ -513,7 +513,7 @@ class TagPath(pathlib.Path):
                     case str():
                         return item
                     case dict():
-                        return cls._encode_root_item(item)
+                        return cls._format_root_item(item)
                     case _:
                         raise TypeError(f"{type(item)}")
 
@@ -550,49 +550,59 @@ class TagPath(pathlib.Path):
                             raise ValueError("dictionarys have same key")
                         dict_data.update(item)
             dict_data = {k: dict_data[k] for k in sorted(dict_data.keys())}
-            return cls._encode_root_item(dict_data)
+            return cls._format_root_item(dict_data)
 
         @classmethod
-        def _encode_dict(cls, dictionary: dict) -> str:
+        def _format_dict(cls, dictionary: dict) -> str:
             assert isinstance(dictionary, dict)
             stem = ",".join(
                 map(
-                    lambda x: f"{cls.encode_string(x[0])}={cls._encode_value(x[1])}",
+                    lambda x: f"{cls.format_string(x[0])}={cls._format_value(x[1])}",
                     dictionary.items(),
                 )
             )
             return "{" + stem + "}"
 
         @classmethod
-        def _encode_list(cls, list_: list) -> str:
+        def _format_list(cls, list_: list) -> str:
             assert isinstance(list_, list)
-            stem = ",".join(map(lambda x: cls._encode_value(x), list_))
+            stem = ",".join(map(lambda x: cls._format_value(x), list_))
             return f"[{stem}]"
 
         @classmethod
-        def _encode_value(cls, item: dict | list | str) -> str:
+        def _format_value(cls, item: dict | list | str) -> str:
             match item:
                 case str():
-                    return cls.encode_string(item)
+                    return cls.format_string(item)
                 case list():
-                    return cls._encode_list(item)
+                    return cls._format_list(item)
                 case dict():
-                    return cls._encode_dict(item)
+                    return cls._format_dict(item)
                 case _:
                     raise TypeError(type(item))
 
         @classmethod
-        def _encode_root_item(cls, item: str | dict):
-            match item:
-                # case str():
-                #     return cls.encode_string(item)
-                case dict():
-                    stem = "#".join(
-                        map(
-                            lambda x: f"{cls.encode_string(x[0])}={cls._encode_value(x[1])}",
-                            item.items(),
-                        )
-                    )
-                    return "#" + stem + "##"
-                case _:
-                    raise ValueError(type(item))
+        def _format_root_item(cls, item: dict):
+            if not isinstance(item, dict):
+                raise TypeError(f"{type(item)}")
+
+            stem = "#".join(
+                map(
+                    lambda x: f"{cls.format_string(x[0])}={cls._format_value(x[1])}",
+                    item.items(),
+                )
+            )
+            return "#" + stem + "##"
+            # match item:
+            #     case str():
+            #         return cls.encode_string(item)
+            #     case dict():
+            #         stem = "#".join(
+            #             map(
+            #                 lambda x: f"{cls.format_string(x[0])}={cls._format_value(x[1])}",
+            #                 item.items(),
+            #             )
+            #         )
+            #         return "#" + stem + "##"
+            #     case _:
+            #         raise ValueError(type(item))
