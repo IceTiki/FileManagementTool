@@ -16,21 +16,28 @@ class TagPath(pathlib.Path):
     _flavour = type(pathlib.Path())._flavour
 
     @classmethod
-    def from_tag_data(cls, data: list[str | dict]) -> typing.Self:
+    def from_tag_data(
+        cls, items: list[str | dict], beautify: bool = False
+    ) -> typing.Self:
         """
         将列表格式化为TagString字符串
 
         Notions
         ---
+        如果启用beautify, 那么
         - 列表中的所有字典会合并到同一个字典中, 首层key会被排序
         - 为避免反复转义, 列表中的所有字符串会被加入到字典中, 键为""(空字符串)的列表中
 
         Parameters
         ---
-        list_ : list[str | dict]
+        items : list[str | dict]
             ...
+        beautify : bool
+            是否启用美化
         """
-        return cls(cls.Encoder.encode_as_filename_stem(data))
+        if beautify:
+            return cls(cls.Formater.beautify_join(items))
+        return cls(cls.Formater.join(items))
 
     def __new__(cls, string: str | pathlib.Path):
         return super(TagPath, cls).__new__(cls, string)
@@ -40,24 +47,34 @@ class TagPath(pathlib.Path):
         self._some_instance_ppath_value = self.exists()  # Path method
 
     def __iter__(self):
-        return self.tag_data.__iter__()
+        return self.parsed.__iter__()
 
     @property
-    def tag_data(self) -> list[str | dict]:
-        return self.Decoder(self.stem).resolute()
+    def parsed(self) -> list[str | dict]:
+        """分段解析字符串, TagString解析为字典, 其他保留原样"""
+        return self.Parser(self.stem).resolute()
+
+    @property
+    def combined_tagdata(self) -> dict:
+        """将所有解析出的TagString字典进行合并, 有重复键则其值以后者为准"""
+        result = {}
+        for i in self.parsed:
+            if isinstance(i, dict):
+                result.update(i)
+        return result
 
     @property
     def formated(self) -> typing.Self:
         """格式化自身TagString"""
-        tag_data = self.tag_data
+        tag_data = self.parsed
         for i in tag_data:
             if isinstance(i, dict):
                 break
         else:
-            # 如果tag_data中没有从TagString中解析出的dict, 那么该字符串不需要梅花
+            # 如果tag_data中没有从TagString中解析出的dict, 那么该字符串不需要美化
             return self
 
-        formated_filestem = str(self.from_tag_data(self.tag_data))
+        formated_filestem = str(self.from_tag_data(self.parsed))
         if self.is_dir():
             # 如果原路径指向文件夹, 那么pathlib.Path的stem不会用"."划分stem和suffix
             # 但是格式化后的新路径不一定指向文件夹, 那么其中的"."就会导致stem和suffix错误地被划分
@@ -65,7 +82,32 @@ class TagPath(pathlib.Path):
             formated_filestem = formated_filestem.replace(".", "`x2e")
         return self.with_stem(formated_filestem)
 
-    class Decoder:
+    @property
+    def _test_parser_eq_format(self) -> bool:
+        par_for = self.with_stem(self.from_tag_data(self.parsed).__str__())
+        if self == par_for:
+            return True
+        print(
+            f"""===============NOT EQUAL===============
+> {self.name}
+< {par_for.name}
+======================================="""
+        )
+        return False
+
+    @property
+    def _test_folder(self) -> None:
+        from tikilib import system as ts
+
+        n = 0
+        for i in ts.Path.traversing_generator(self):
+            i = self.__class__(i)
+            i._test_parser_eq_format
+            n += 1
+            if n % 10000 == 0:
+                print(n)
+
+    class Parser:
         TRAN_TAG = set("`#=,{}[]")
         TRAN_C1 = set("\\abnvtrf\"'")
         TRAN_C3 = set("x" + "01234567")
@@ -77,11 +119,11 @@ class TagPath(pathlib.Path):
             def __init__(self, *args: object, position=None, msg=None) -> None:
                 self.position = position
                 if not args:
-                    errmsg = "TagString解析错误"
+                    errmsg = "TagString解析错误。"
                     if msg is not None:
-                        errmsg += f", {msg}"
+                        errmsg += f"{msg}。"
                     if position is not None:
-                        errmsg += f", 错误出现在{position}"
+                        errmsg += f"错误出现在{position}。"
                     args = [errmsg]
 
                 super().__init__(*args)
@@ -114,32 +156,38 @@ class TagPath(pathlib.Path):
             self.__cursor = left_limit
 
         def __show_cursor_position(self) -> str:
-            if self.__cursor < self.__left_limit:
-                return f"before {self.__string[self.__left_limit:self.__right_limit].__repr__()}"
-            elif not self.__cursor < self.__right_limit:
-                return f"after {self.__string[self.__left_limit:self.__right_limit].__repr__()}"
+            if self.__cursor < 0:
+                return f"before {self.__string[0:self.__length].__repr__()}"
+            elif not self.__cursor < self.__length:
+                return f"after {self.__string[0:self.__length].__repr__()}"
             else:
                 l = [
-                    self.__string[self.__left_limit : self.__cursor],
+                    self.__string[0 : self.__cursor],
                     self.__cursor_chara,
-                    self.__string[self.__cursor + 1 : self.__right_limit],
+                    self.__string[self.__cursor + 1 : self.__length],
                 ]
                 return f"middle of {l}"
 
-        def __cursor_add(self, step=1, check_limit=True):
+        def __cursor_add(self, step=1, check_limit=True, do_warning=True):
             self.__cursor += step
             if not self.__cursor < self.__right_limit and check_limit:
-                raise self.TagStringDecodeError(
-                    position=self.__show_cursor_position(), msg="unexpect end"
+                e = self.TagStringDecodeError(
+                    position=self.__show_cursor_position(), msg="游标越界"
                 )
+                if do_warning:
+                    print(e)
+                raise e
 
         def __decode_assert(self, item):
             if not item:
-                raise self.TagStringDecodeError(
-                    position=self.__show_cursor_position(), msg="unexpect char"
+                e = self.TagStringDecodeError(
+                    position=self.__show_cursor_position(),
+                    msg=f"不应出现的字符'{self.__cursor_chara}'",
                 )
+                print(e)
+                raise e
 
-        def __catch_tran(self, do_tran: bool = True) -> str:
+        def __catch_tran(self) -> str:
             """
             转义字符匹配
             开始时指针指向: 转义字符"`"
@@ -147,8 +195,6 @@ class TagPath(pathlib.Path):
 
             Parameters
             ---
-            do_tran : bool, default = True
-                将捕捉到的转义字符串转义
             """
             self.__decode_assert(self.__cursor_chara == "`")
             # 指向转义字符的下一个字符
@@ -159,7 +205,7 @@ class TagPath(pathlib.Path):
             # TagString特殊字符转义
             if cursor_chara in self.TRAN_TAG:
                 # 1字符
-                return cursor_chara if do_tran else "`" + cursor_chara
+                return cursor_chara
             # 其他转义
             elif cursor_chara in self.TRAN_C1:
                 cursor_add = 0  # 1字符
@@ -176,19 +222,30 @@ class TagPath(pathlib.Path):
             self.__cursor_add(cursor_add)
 
             tran_slice = self.__string[slice_start : self.__cursor + 1]
-            return (
-                f"\\{tran_slice}".encode().decode("unicode_escape")
-                if do_tran
-                else "`" + tran_slice
-            )
+            return f"\\{tran_slice}".encode().decode("unicode_escape")
 
-        def __catch_string(
-            self, end_chara: str, error_chara: set = set(), do_tran: bool = True
-        ) -> str:
+        def __catch_before_tagstring(self) -> str:
+            """匹配#(TagString开始标志), 并将前面的普通字符串返回
+
+            开始时指针指向: 字符串的第一个字符字符
+            结束时指针指向: "#"
+            """
+            result = ""
+            self.__cursor_add(0, do_warning=False)
+
+            while True:
+                cursor_chara = self.__cursor_chara
+                if cursor_chara == "#":
+                    return result
+                result += cursor_chara
+                # 指针自增
+                self.__cursor_add(do_warning=False)
+
+        def __catch_string(self, end_chara: str, error_chara: set = set()) -> str:
             """
             匹配字符串
             开始时指针指向: 字符串的第一个字符字符
-            结束时指针指向: 字符串的最后一个字符
+            结束时指针指向: 结束字符
 
             Parameters
             ---
@@ -196,8 +253,6 @@ class TagPath(pathlib.Path):
                 结束字符
             error_chara : set
                 错误字符(遇到该字符则报错, 除非字符被转义豁免)
-            do_tran : bool, default = True
-                是否处理字符串内的转义字符
             """
             result = ""
             self.__cursor_add(0)
@@ -208,14 +263,10 @@ class TagPath(pathlib.Path):
                 if cursor_chara in end_chara:
                     return result
                 # 匹配错误字符
-                if cursor_chara in error_chara:
-                    raise self.TagStringDecodeError(
-                        self.__show_cursor_position(),
-                        msg=f"unexpect char {cursor_chara}",
-                    )
+                self.__decode_assert(cursor_chara not in error_chara)
                 # 匹配转义字符(指针会自动跳到转义字符串的最后一个)
                 normal_chara = (
-                    self.__catch_tran(do_tran) if cursor_chara == "`" else cursor_chara
+                    self.__catch_tran() if cursor_chara == "`" else cursor_chara
                 )
 
                 result += normal_chara
@@ -227,7 +278,7 @@ class TagPath(pathlib.Path):
             """
             匹配字典
             开始时指针指向: 字典的第一个字符字符
-            结束时指针指向: 字典之后的第一个字符
+            结束时指针指向: 字典之后的第一个字符 ("}"之后)
             """
             self.__decode_assert(self.__cursor_chara == "{")
             self.__cursor_add()
@@ -256,13 +307,17 @@ class TagPath(pathlib.Path):
                         value = self.__catch_list()
                     case _:
                         value = self.__catch_string(",}", set("#={[]"))
+                if key in result:
+                    print(
+                        f"Warning: the value {repr(result[key])} of key {repr(key)} has been replaced by {repr(value)}"
+                    )
                 result[key] = value
 
         def __catch_list(self) -> list:
             """
             匹配列表
             开始时指针指向: 列表的第一个字符字符
-            结束时指针指向: 列表之后的第一个字符
+            结束时指针指向: 列表之后的第一个字符 ("]"之后)
             """
             self.__decode_assert(self.__cursor_chara == "[")
             self.__cursor_add()
@@ -291,17 +346,49 @@ class TagPath(pathlib.Path):
             """
             匹配值
             开始时指针指向: 值的第一个字符字符
-            结束时指针指向: 值之后的第一个字符
+            结束时指针指向: 值之后的第一个字符"#"
             """
             while True:
                 match self.__cursor_chara:
                     case "{":
-                        return self.__catch_dict()
+                        value = self.__catch_dict()
+                        self.__decode_assert(self.__cursor_chara == "#")
+                        return value
                     case "[":
-                        return self.__catch_list()
+                        value = self.__catch_list()
+                        self.__decode_assert(self.__cursor_chara == "#")
+                        return value
                     case _:
                         # 字符串类型
-                        return self.__catch_string("#")
+                        return self.__catch_string("#", set(",={}[]"))
+
+        def __catch_tagstring(self):
+            result = {}
+
+            while True:
+                # 跳过每个键值对开始的"#"
+                self.__decode_assert(self.__cursor_chara == "#")
+                self.__cursor_add()
+                # 匹配结束
+                if self.__cursor_chara == "#":
+                    self.__decode_assert(
+                        self.__cursor - self.__left_limit > 1
+                    )  # 避免将以"##"开头的字符串, 识别为结束
+                    self.__init_cursor(self.__cursor + 1)
+                    return result
+
+                # 捕捉key, 直到指针达到"="
+                key = self.__catch_string("=", set("#,{}[]"))
+                self.__decode_assert(self.__cursor_chara == "=")
+
+                # 捕捉value, 直到达到"#"
+                self.__cursor_add()
+                value = self.__catch_value()
+                if key in result:
+                    print(
+                        f"Warning: the value {repr(result[key])} of key '{repr(key)}' has been replaced by {repr(value)}"
+                    )
+                result[key] = value
 
         def resolute(self) -> list[str | dict]:
             """
@@ -332,36 +419,23 @@ class TagPath(pathlib.Path):
 
             while self.__left_limit < self.__length:
                 try:
-                    value = self.__catch_string("#", do_tran=False)
+                    # 开始前的普通字符串
+                    value = self.__catch_before_tagstring()
+                    append_result(value)
+                    self.__init_cursor(self.__cursor)
+                    # 尝试解析TagString
+                    value = self.__catch_tagstring()
                     append_result(value)
 
-                    self.__decode_assert(self.__cursor_chara == "#")
-                    self.__cursor_add()
-                    if self.__cursor_chara == "#":
-                        self.__decode_assert(
-                            self.__cursor - self.__left_limit > 1
-                        )  # 避免将以"##"开头的字符串, 识别为结束
-                        append_result()  # 达到TagString结束
-                        self.__init_cursor(self.__cursor + 1)
-                        continue
-
-                    # 捕捉key, 直到指针达到"="
-                    key = self.__catch_string("=")
-                    self.__decode_assert(self.__cursor_chara == "=")
-
-                    # 捕捉value, 直到指针越界或达到"#"
-                    self.__cursor_add()
-                    value = self.__catch_value()
-                    new_item[0][key] = value
-
-                except self.TagStringDecodeError:
+                except self.TagStringDecodeError as e:
+                    # print(f"Warning: except TagStringDecodeError:\n{e}")
                     # 在self.__cursor处出现解析错误, 将前面的部分视作普通字符串
                     append_result(self.__string[self.__left_limit : self.__cursor])
                     self.__init_cursor(self.__cursor)
 
             return result
 
-    class Encoder:
+    class Formater:
         @staticmethod
         def chr_escape(
             chara: str,
@@ -423,7 +497,30 @@ class TagPath(pathlib.Path):
             return "".join(map(cls.chr_escape, string))
 
         @classmethod
-        def encode_as_filename_stem(cls, list_: list[str | dict]):
+        def join(cls, list_: list[str | dict]):
+            """
+            将列表中的字典格式化为TagString字符串
+
+            Parameters
+            ---
+            list_ : list[str | dict]
+                ...
+            """
+            assert isinstance(list_, typing.Sequence)
+
+            def convertor(item):
+                match item:
+                    case str():
+                        return item
+                    case dict():
+                        return cls._encode_root_item(item)
+                    case _:
+                        raise TypeError(f"{type(item)}")
+
+            return "".join(map(convertor, list_))
+
+        @classmethod
+        def beautify_join(cls, list_: list[str | dict]):
             """
             将列表格式化为TagString字符串
 
@@ -437,6 +534,7 @@ class TagPath(pathlib.Path):
             list_ : list[str | dict]
                 ...
             """
+            assert isinstance(list_, typing.Sequence)
             dict_data = {}
             for item in list_:
                 match item:
