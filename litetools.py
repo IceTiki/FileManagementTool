@@ -1,13 +1,15 @@
 # 标准库
-import os
+import os as _os
 import json as _json
 import hashlib as _hashlib
-import os
-import traceback
-import sys
-from io import TextIOWrapper
-import uuid
-import time
+import traceback as _traceback
+import sys as _sys
+import io as _io
+import uuid as _uuid
+import time as _time
+import sqlite3 as _sqlite3
+import re as _re
+import typing as _typing
 
 # 第三方库
 import yaml as _yaml  # pyyaml
@@ -20,9 +22,9 @@ class Decorators:
     def except_all_error(func):
         def new_func(*args, **kwargs):
             try:
-                func(*args, **kwargs)
+                return func(*args, **kwargs)
             except Exception as e:
-                print(traceback.format_exc())
+                print(_traceback.format_exc())
 
         return new_func
 
@@ -34,11 +36,11 @@ class FileOut:
     close()方法可以还原stdout和stderr
     """
 
-    stdout = sys.stdout
-    stderr = sys.stderr
+    stdout = _sys.stdout
+    stderr = _sys.stderr
     log: str = ""  # 同时将所有输出记录到log字符串中
-    logFile: TextIOWrapper = None
-    start_time = time.time()
+    logFile: _io.TextIOWrapper = None
+    start_time = _time.time()
 
     @classmethod
     def setFileOut(cla, path: str = None):
@@ -54,10 +56,10 @@ class FileOut:
         # 更新日志文件输出
         if path:
             try:
-                path = os.path.abspath(path)
-                logDir = os.path.dirname(path)
-                if not os.path.isdir(logDir):
-                    os.makedirs(logDir)
+                path = _os.path.abspath(path)
+                logDir = _os.path.dirname(path)
+                if not _os.path.isdir(logDir):
+                    _os.makedirs(logDir)
                 cla.logFile = open(path, "w+", encoding="utf-8")
                 cla.logFile.write(cla.log)
                 cla.logFile.flush()
@@ -73,9 +75,9 @@ class FileOut:
     @classmethod
     def start(cla):
         """开始替换stdout和stderr"""
-        if type(sys.stdout) != cla and type(sys.stderr) != cla:
-            sys.stdout = cla
-            sys.stderr = cla
+        if type(_sys.stdout) != cla and type(_sys.stderr) != cla:
+            _sys.stdout = cla
+            _sys.stderr = cla
         else:
             print("sysout/syserr已被替换为FileOut")
 
@@ -105,8 +107,8 @@ class FileOut:
         if cla.logFile:
             cla.logFile.close()
         cla.log = ""
-        sys.stdout = cla.stdout
-        sys.stderr = cla.stderr
+        _sys.stdout = cla.stdout
+        _sys.stderr = cla.stderr
 
 
 class System:
@@ -117,24 +119,24 @@ class System:
         """输入路径，层次遍历返回文件和文件夹的绝对路径列表"""
         fileList = []
         folderlist = []
-        for root, dirs, files in os.walk(path, topdown=False):
+        for root, dirs, files in _os.walk(path, topdown=False):
             for name in files:
-                fileDir = os.path.join(root, name)
-                fileDir = os.path.abspath(fileDir)
+                fileDir = _os.path.join(root, name)
+                fileDir = _os.path.abspath(fileDir)
                 fileList.append(fileDir)
             for name in dirs:
-                folderDir = os.path.join(root, name)
-                folderDir = os.path.abspath(folderDir)
+                folderDir = _os.path.join(root, name)
+                folderDir = _os.path.abspath(folderDir)
                 folderlist.append(folderDir)
         return fileList, folderlist
 
     @staticmethod
     def get_device_id():
-        return uuid.getnode()
+        return _uuid.getnode()
 
     @staticmethod
     def get_mac_address():
-        mac = uuid.UUID(int=uuid.getnode()).hex[-12:]
+        mac = _uuid.UUID(int=_uuid.getnode()).hex[-12:]
         mac = ":".join([mac[e : e + 2] for e in range(0, 11, 2)])
         return mac
 
@@ -143,19 +145,19 @@ class System:
         """相对路径转绝对路径(相对稳定, 测试中, 半成品)(os模块中, 无法拼接相对路径和其他盘符的绝对路径)"""  # TODO
         # 检查是否为路径
         if not (
-            os.path.isdir(path) or os.path.isdir(start_path) or os.path.isfile(path)
+            _os.path.isdir(path) or _os.path.isdir(start_path) or _os.path.isfile(path)
         ):
             raise Exception("error!")
         # 检查起点是否为文件，是：取其目录
-        if os.path.isfile(start_path):
-            start_path = os.path.dirname(start_path)
+        if _os.path.isfile(start_path):
+            start_path = _os.path.dirname(start_path)
         # 检查路径是否为绝对路径，是：返回目录
-        if os.path.isabs(path):
+        if _os.path.isabs(path):
             return path
 
         # 格式化路径
-        start_path = os.path.abspath(start_path)
-        path = os.path.normpath(path)
+        start_path = _os.path.abspath(start_path)
+        path = _os.path.normpath(path)
 
         # 检查是否没有追溯上层目录
         for c in path.split("\\")[0]:
@@ -173,10 +175,10 @@ class System:
             for i in range(len(start_path) - backTimes + 1):
                 relpath_ += start_path[i] + "\\"
             if len(path_split) == 1:
-                return os.path.normpath(relpath_)
+                return _os.path.normpath(relpath_)
             else:
                 relpath_ += path_split[1]
-                return os.path.normpath(relpath_)
+                return _os.path.normpath(relpath_)
 
 
 class YamlRW:
@@ -298,7 +300,7 @@ class Hash:
             3.512   sha3-512
         """
         hashObj = Hash.geneHashObj(hash_type)
-        if os.path.isfile(path):
+        if _os.path.isfile(path):
             try:
                 with open(path, "rb") as f:
                     for byte_block in iter(lambda: f.read(1048576), b""):
@@ -402,20 +404,181 @@ class StandardAesStringCrypto:
 
     def pkcs7unpadding(self, text: str):
         """去掉填充字符"""
-        return text[:-ord(text[-1])]
+        return text[: -ord(text[-1])]
 
 
-class ProcessStatus:
-    def __init__(self):
-        self.old_msg = ""
+class DbOperator(_sqlite3.Connection):
+    """
+    python中SQL语句特性
+    ---
+    - 表、列名不能用?占位符
+    - select中, 列名如果用""括起来, 就会被识别为字符串值, 返回结果时不会返回列对应的值, 而是该字符串。填入其他值同理。
+    """
 
-    def rewritemsg(self, msg: str = ""):
-        '''重写旧句子(似乎只支持ascii)'''
-        msg = str(msg)
-        old_msg_len = len(self.old_msg)
-        for letter in self.old_msg:  # 检测长宽度中文字符
-            if (letter >= '\u4e00' and letter <= '\u9fa5') or letter in ['；', '：', '，', '（', '）', '！', '？', '—', '…', '、', '》', '《']:
-                old_msg_len += 1
-        clean = "\b"*old_msg_len + " "*old_msg_len + "\b" * old_msg_len  # 清除上一帧进度条
-        print(clean+msg, end="", flush=True)
-        self.old_msg = msg
+    SQLITE_KEYWORD_SET = set(
+        "ABORT ACTION ADD AFTER ALL ALTER ANALYZE AND AS ASC ATTACH AUTOINCREMENT BEFORE BEGIN BETWEEN BY CASCADE CASE CAST CHECK COLLATE COLUMN COMMIT CONFLICT CONSTRAINT CREATE CROSS CURRENT_DATE CURRENT_TIME CURRENT_TIMESTAMP DATABASE DEFAULT DEFERRABLE DEFERRED DELETE DESC DETACH DISTINCT DROP EACH ELSE END ESCAPE EXCEPT EXCLUSIVE EXISTS EXPLAIN FAIL FOR FOREIGN FROM FULL GLOB GROUP HAVING IF IGNORE IMMEDIATE IN INDEX INDEXED INITIALLY INNER INSERT INSTEAD INTERSECT INTO IS ISNULL JOIN KEY LEFT LIKE LIMIT MATCH NATURAL NO NOT NOTNULL NULL OF OFFSET ON OR ORDER OUTER PLAN PRAGMA PRIMARY QUERY RAISE RECURSIVE REFERENCES REGEXP REINDEX RELEASE RENAME REPLACE RESTRICT RIGHT ROLLBACK ROW SAVEPOINT SELECT SET TABLE TEMP TEMPORARY THEN TO TRANSACTION TRIGGER UNION UNIQUE UPDATE USING VACUUM VALUES VIEW VIRTUAL WHEN WHERE WITH WITHOUT".split(
+            " "
+        )
+    )
+
+    @classmethod
+    def check_name_normal(cls, name: str):
+        """检查名字仅含[a-zA-Z0-9_]且并非关键字"""
+        if name.upper() in cls.SQLITE_KEYWORD_SET:
+            return False
+        if not _re.match(r"^\w+$", name):
+            return False
+        return True
+
+    def __init__(
+        self,
+        database: str | bytes | _os.PathLike[str] | _os.PathLike[bytes],
+        *args,
+        **kwargs,
+    ):
+        """
+        database: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        timeout: float = ...,
+        detect_types: int = ...,
+        isolation_level: str | None = ...,
+        check_same_thread: bool = ...,
+        factory: type[sqlite3.Connection] | None = ...,
+        cached_statements: int = ...,
+        uri: bool = ...,
+        """
+        super().__init__(database, *args, **kwargs)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    @property
+    def table_list(self) -> list[str]:
+        """
+        Returns
+        ---
+        表名列表
+        """
+        sentence = "SELECT NAME FROM SQLITE_MASTER WHERE TYPE='table' ORDER BY NAME"  # SQLITE_MASTER不区分大小写, table必须为小写
+        return [i[0] for i in self.cursor_execute(sentence)]
+
+    def get_table_info(self, tbl_name: str):
+        """
+        获取表详情
+
+        Warning: 没有对传入参数进行检查, 有sql注入风险
+        """
+        res = self.execute(f"PRAGMA table_info('{tbl_name}')")
+        return list(res.fetchall())
+
+    def try_exe(self, *args, **kwargs) -> _sqlite3.Cursor:
+        """execute的自动commit版本, 如果出错会自动rollback"""
+        try:
+            result = self.execute(*args, **kwargs)
+            self.commit()
+            return result
+        except Exception as e:
+            self.rollback()
+            raise e
+
+    def try_exemany(self, *args, **kwargs) -> _sqlite3.Cursor:
+        """executemany的自动commit版本, 如果出错会自动rollback"""
+        try:
+            result = self.executemany(*args, **kwargs)
+            self.commit()
+            return result
+        except Exception as e:
+            self.rollback()
+            raise e
+
+    def create_table(self, table: str, columns: list[tuple[str]]) -> _sqlite3.Cursor:
+        """
+        创建表(如果表已存在, 则不执行创建)
+
+        Warning: 没有对传入参数进行检查, 有sql注入风险
+
+        Parameters
+        ---
+        table : str
+            表名
+        columns : list[tuple[str]]
+            列属性, 应为(name, type, *constraints)
+        """
+
+        def fcolumn(column: tuple[str]):
+            column = tuple(column)
+            return f"'{column[0]}' " + " ".join(column[1:])
+
+        columns = ",\n".join(map(fcolumn, columns))
+
+        sentence = f"CREATE TABLE IF NOT EXISTS '{table}' ({columns});"
+        return self.try_exe(sentence)
+
+    def select(
+        self,
+        table: str,
+        column_name: str | _typing.Iterable[str] = "*",
+        clause: str = "",
+    ) -> _sqlite3.Cursor:
+        """
+        查询
+
+        Warning: 没有对传入参数进行检查, 有sql注入风险
+
+        Parameters
+        ---
+        table : str
+            表名
+        column_name : str | typing.Iterable[str], default = "*"
+            列名
+        clause : str
+            子句(比如WHERE ORDER等)
+        """
+        if isinstance(column_name, str):
+            if column_name == "*":
+                pass
+            else:
+                column_name = f"{column_name}"
+        elif isinstance(column_name, _typing.Iterable):
+            column_name = ", ".join((f"{i}" for i in column_name))
+
+        sentence = f"""SELECT {column_name} FROM {table} {clause};"""
+        return self.execute(sentence)
+
+    def insert_many(
+        self,
+        table: str,
+        column_name: str | _typing.Iterable[str],
+        data: list[tuple[_typing.Any]],
+        clause: str = "",
+    ) -> _sqlite3.Cursor:
+        """
+        插入
+
+        Warning: 没有对传入参数进行检查, 有sql注入风险
+
+        Parameters
+        ---
+        table : str
+            表名
+        column_name : str | Iterable[str]
+            列名
+        data : list[tuple[Any]]
+            tuple[Any]代表单行数据包装为一个元组
+        clause : str
+            子句
+        """
+        if isinstance(column_name, str):
+            column_name = f"('{column_name}')"
+            placeholder = "(?)"
+        elif isinstance(column_name, _typing.Iterable):
+            placeholder = "(" + ", ".join(map(lambda x: "?", column_name)) + ")"
+            column_name = ", ".join((f"'{i}'" for i in column_name))
+            column_name = f"({column_name})"
+
+        sentence = f"INSERT INTO '{table}' {column_name} VALUES {placeholder} {clause};"
+        return self.try_exemany(sentence, data)
+
+    _update = "UPDATE table SET column_name1 = ? where column_name2 = ?;"
