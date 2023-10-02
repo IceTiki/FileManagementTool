@@ -1,12 +1,10 @@
 import re as _re
 import typing as _typing
-import random as _random
-import shutil as _shutil
 import hashlib as _hashlib
 import pathlib as _pathlib
-import typing as _typing
 import os as _os
 import time as _time
+import shutil as _shutil
 import functools as _functools
 
 from . import litetools as _lt
@@ -15,88 +13,27 @@ import loguru as _loguru
 import tqdm as _tqdm
 
 
-VERSION = "1.1.0"
+FSDB_VERSION = "1.1.0"
+FM_VERSION = "1.0.0-beta"
 
 
-class FolderStatus:
-    path_sta = tuple[str, bool, str, int]
-    list_sta = list[path_sta]
-    varience = tuple[str, bool, str, int, float, bool]
-    list_varience = list[varience]
+class ObjectFolder:
+    """「对象」文件夹"""
 
-    def __init__(
-        self,
-        folder_path: str | _pathlib.Path = "",
-        dbpath: str | _pathlib.Path = "status.db",
-    ) -> None:
-        """
-        Parameters
-        ---
-        folder_path : str | _pathlib.Path = ""
-            文件夹路径
-        dbpath : str | _pathlib.Path = "status.db"
-            数据路径
-        """
-        self.__root = _pathlib.Path(folder_path).absolute()
-        self.__dbpath = _pathlib.Path(dbpath).absolute()
+    def __init__(self, folder_path: str | _pathlib.Path) -> None:
+        self.root = folder_path
+
+    @property
+    def root(self) -> _pathlib.Path:
+        return self.__root
+
+    @root.setter
+    def root(self, new_root: str | _pathlib.Path):
+        self.__root: _pathlib.Path = _pathlib.Path(new_root).absolute()
+        self.__cache: dict = {}
 
     @staticmethod
-    def __gene_varience(
-        list_old: list_sta, list_new: list_sta, time_: float = _time.time()
-    ) -> list_varience:
-        """
-        获取两个列表的变化, 返回变化
-        Parameters
-        ---
-        list_old, list_new : typing.Sequence
-            旧列表和新列表
-        """
-        set_old = set(list_old)
-        set_new = set(list_new)
-        added = set_new.difference(set_old)
-        deleted = set_old.difference(set_new)
-        added = [i + (time_, True) for i in added]
-        deleted = [i + (time_, False) for i in deleted]
-        varience = added + deleted
-        varience.sort()
-        return varience
-
-    @staticmethod
-    @_loguru.logger.catch
-    def _file_sha256(file_path: _pathlib.Path) -> str | None:
-        """
-        Parameters
-        ---
-        file_path : _pathlib.Path
-            指向文件的路径
-
-        Returns
-        ---
-        如果计算出错返回None, 否则返回sha256(Hex编码)
-        """
-        hashobj = _hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for byte_block in iter(lambda: f.read(1048576), b""):
-                hashobj.update(byte_block)
-            return hashobj.hexdigest()
-
-    @staticmethod
-    @_loguru.logger.catch
-    def __file_size(file_path: _pathlib.Path) -> str | None:
-        """
-        Parameters
-        ---
-        file_path : _pathlib.Path
-            指向文件的路径
-
-        Returns
-        ---
-        如果计算出错返回None, 否则返回文件大小
-        """
-        return file_path.stat().st_size
-
-    @staticmethod
-    def find_fmi(folder_path: _pathlib.Path) -> _pathlib.Path:
+    def find_fmi(folder_path: str | _pathlib.Path) -> _pathlib.Path:
         """
         优先查找名为".fmi"的文件夹, 其次查找名为".fmi_[id-8/12/16]"的文件夹
         如果未能找到唯一fmi文件夹, 则报错
@@ -105,7 +42,7 @@ class FolderStatus:
         ---
         OSError
         """
-        folder_path = folder_path.absolute()
+        folder_path = _pathlib.Path(folder_path).absolute()
         assert folder_path.is_dir()
 
         if match_ := _re.match(
@@ -139,13 +76,186 @@ class FolderStatus:
 
                 raise OSError("未能确定.fmi文件夹")
 
+    @property
+    def fmi_dir(self):
+        if "fmi_dir" not in self.__cache:
+            self.__cache["fmi_dir"] = self.find_fmi(self.root)
+        return self.__cache["fmi_dir"]
+
+    @property
+    def status_database_dir(self):
+        return self.fmi_dir / "status.db"
+
+    @property
+    def folder_status(self):
+        return FolderStatus(self.root, self.status_database_dir)
+
+
+class FolderStatus:
+    """文件夹变动追踪数据库"""
+
+    _t_path_sta = tuple[str, bool, str, int]
+    _t_list_sta = list[_t_path_sta]
+    _t_variance = tuple[str, bool, str, int, float, bool]
+    _t_list_variance = list[_t_variance]
+
+    _variance_column_name: tuple[str] = (
+        "PATH",
+        "ISFILE",
+        "SHA256",
+        "SIZE",
+        "TIME",
+        "CHANGE",
+    )
+    _status_column_name: tuple[str] = ("PATH", "ISFILE", "SHA256", "SIZE")
+    _info_column_name: tuple[str] = ("TIME", "ROOT", "MAC", "COMMENT", "VERSION")
+
+    force_hash: bool = False  # 是否强制计算所有文件哈希值(如果为False, 则通过mtime、size等参数判断文件是否需要重新计算哈希)
+
+    def __init__(
+        self,
+        folder_path: str | _pathlib.Path,
+        dbpath: str | _pathlib.Path,
+    ) -> None:
+        """
+        Parameters
+        ---
+        folder_path : str | pathlib.Path
+            文件夹路径
+        dbpath : str | pathlib.Path
+            数据路径
+        """
+        self.__root = _pathlib.Path(folder_path).absolute()
+        self.__dbpath = _pathlib.Path(dbpath).absolute()
+        self.__cache = {}
+
+    @staticmethod
+    def __gene_variance(
+        list_old: _t_list_sta, list_new: _t_list_sta, time_: float
+    ) -> _t_list_variance:
+        """
+        获取两个列表的变化, 返回变化
+        Parameters
+        ---
+        list_old, list_new : typing.Sequence
+            旧列表和新列表
+        """
+        set_old = set(list_old)
+        set_new = set(list_new)
+        added = set_new.difference(set_old)
+        deleted = set_old.difference(set_new)
+        added = [i + (time_, True) for i in added]
+        deleted = [i + (time_, False) for i in deleted]
+        variance = added + deleted
+        variance.sort()
+        return variance
+
+    @staticmethod
     @_loguru.logger.catch
-    def __path_status(self, path: _pathlib.Path) -> path_sta:
+    def _cal_sha256(file_path: _pathlib.Path) -> str | None:
+        """
+        Parameters
+        ---
+        file_path : _pathlib.Path
+            指向文件的路径
+
+        Returns
+        ---
+        如果计算出错返回None, 否则返回sha256(Hex编码)
+        """
+        hashobj = _hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(1048576), b""):
+                hashobj.update(byte_block)
+            return hashobj.hexdigest()
+
+    @staticmethod
+    @_loguru.logger.catch
+    def __get_file_size(file_path: _pathlib.Path) -> str | None:
+        """
+        Parameters
+        ---
+        file_path : _pathlib.Path
+            指向文件的路径
+
+        Returns
+        ---
+        如果计算出错返回None, 否则返回文件大小
+        """
+        return file_path.stat().st_size
+
+    @_loguru.logger.catch
+    def __calculating_path_status(self, path: _pathlib.Path) -> _t_path_sta:
+        """
+        整合统计路径状态, 生成路径状态信息。
+        (所有文件都会计算sha256)
+
+        Parameters
+        ---
+        path : pathlib.Path
+            路径
+        """
         relpath: str = str(path.relative_to(self.__root))
         if path.is_file():
-            return (relpath, True, self._file_sha256(path), self.__file_size(path))
+            return (relpath, True, self._cal_sha256(path), self.__get_file_size(path))
         else:
             return (relpath, False, None, None)
+
+    @property
+    def __gene_path_status(self) -> _typing.Callable[[_pathlib.Path], _t_path_sta]:
+        if self.force_hash:
+            return self.__calculating_path_status
+        else:
+            update_time_list: float = map(
+                lambda x: x[0], self._database.select("INFO", "TIME")
+            )
+            last_update_time: float = max(update_time_list, default=0)
+            db_data: dict[str, self._t_path_sta] = {
+                i[0]: i for i in self._database.select("STATUS")
+            }
+
+            @_loguru.logger.catch
+            def lazy_calculating_path_status(path: _pathlib.Path):
+                """
+                整合统计路径状态, 生成路径状态信息。
+                如果数据库中已有该文件的数据, 且通过mtime、size、is_file判断文件没有发生变动, 则直接返回数据库中的数据(减少sha256计算量)。
+
+                Parameters
+                ---
+                path : pathlib.Path
+                    路径
+                """
+                relpath: str = str(path.relative_to(self.__root))
+                if not path.is_file():
+                    return (relpath, False, None, None)
+                if db_path_data := db_data.get(relpath, None):
+                    _, db_isfile, _, db_size = db_path_data
+                else:
+                    return self.__calculating_path_status(path)
+
+                # 比对信息
+                stat = path.stat()
+                if (
+                    stat.st_mtime < last_update_time
+                    and stat.st_size == db_size
+                    and db_isfile == path.is_file()
+                ):
+                    return db_path_data
+                else:
+                    return self.__calculating_path_status(path)
+
+            return lazy_calculating_path_status
+
+    @property
+    def _database(self) -> _lt.DbOperator:
+        if "db" not in self.__cache:
+            if self.__dbpath.is_file():
+                db = _lt.DbOperator(self.__dbpath)
+            else:
+                db = self.__create_database()
+
+            self.__cache["db"] = db
+        return self.__cache["db"]
 
     @property
     def iterdirs(self) -> _typing.Generator[_pathlib.Path, None, None]:
@@ -165,6 +275,85 @@ class FolderStatus:
                 yield item_dir
 
     @property
+    def change_overview(self) -> str:
+        """以markdown语法, 返回文件夹内文件和文件夹的变动"""
+        _loguru.logger.info("扫描文件夹中被更改的项目")
+        _loguru.logger.info("    载入数据库内旧的文件夹状态数据")
+        old_folder_status: self._t_list_sta = self._database.select("STATUS")
+        _loguru.logger.info("    扫描文件夹变动")
+        variance = self.__gene_variance(
+            old_folder_status, self.__scan_folder_status(), 0
+        )
+
+        # 装为dict
+        sta_dict = {}
+        for path, is_file, _, _, _, change in variance:
+            path = _pathlib.Path(path)
+            insert_target = sta_dict
+
+            parts = path.parts
+            last_idx = len(parts) - 1
+            for i, p in enumerate(parts):
+                i: int
+                p: str
+                insert_target: dict
+                get_ = insert_target.get(p)
+
+                if get_ is None:
+                    insert_target.setdefault(p, {})
+
+                if i == last_idx:
+                    flag = "- [x] " if change else "- [ ] "
+                    flag = (
+                        flag
+                        if {insert_target[p].get(0), flag} != {"- [x] ", "- [ ]"}
+                        else "* "
+                    )
+                    insert_target[p][0] = f"{flag}{'`f`' if is_file else '`d`'}"
+
+                insert_target = insert_target[p]
+
+        # 解dict
+        msg = [
+            f"""# 符号说明
+
+`d`——文件夹
+
+`f`——文件
+
+* 变动
+- [x] 新增
+- [ ] 删去
+
+# 变更总览
+
+根目录: `{self.__root}`
+"""
+        ]
+        pathiter = None
+        stack = [iter(sta_dict.items())]
+        while stack or pathiter:
+            if not pathiter:
+                pathiter = stack.pop()
+            for k, v in pathiter:
+                k: str
+                v: dict
+                if tuple(v.keys()) == (0,):
+                    # 到头了
+                    msg.append("    " * len(stack) + v[0] + str(k))
+                else:
+                    # 没到头
+                    head = v.pop(0, "* `d`")
+                    msg.append("    " * len(stack) + head + str(k))
+                    stack.append(pathiter)
+                    pathiter = iter(v.items())
+                    break
+            else:
+                pathiter = None
+
+        return "\n".join(msg)
+
+    @property
     def __gene_update_info(self):
         """TIME ROOT MAC COMMENT VERSION"""
         return (
@@ -172,18 +361,19 @@ class FolderStatus:
             str(self.__root),
             _lt.System.get_mac_address(),
             "",
-            VERSION,
+            FSDB_VERSION,
         )
 
-    @property
-    @_functools.cache
-    def __folder_status(self) -> list_sta:
-        path_seq = _tqdm.tqdm(
-            list(self.iterdirs), desc=f"扫描文件夹'{self.__root.name}'内项目", mininterval=1
-        )
-        sta = [self.__path_status(path) for path in path_seq]
-        sta.sort()
-        return sta
+    def __scan_folder_status(self, force_update=False) -> _t_list_sta:
+        key = "folder_status"
+        if force_update or key not in self.__cache:
+            path_seq = _tqdm.tqdm(
+                list(self.iterdirs), desc=f"扫描文件夹'{self.__root.name}'内项目", mininterval=1
+            )
+            sta = list(map(self.__gene_path_status, path_seq))
+            sta.sort()
+            self.__cache[key] = sta
+        return self.__cache[key]
 
     def __create_database(self) -> _lt.Decorators:
         """创建数据库"""
@@ -231,52 +421,147 @@ class FolderStatus:
         )
         # 载入基本数据
         _loguru.logger.info("    初始化数据库基础数据")
-        db.insert_many(
-            "STATUS", ["PATH", "ISFILE", "SHA256", "SIZE"], self.__folder_status
-        )
+        db.try_exe("DELETE FROM STATUS;")
+        db.insert_many("STATUS", self._status_column_name, self.__scan_folder_status())
         db.insert_many(
             "INFO",
-            ["TIME", "ROOT", "MAC", "COMMENT", "VERSION"],
+            self._info_column_name,
             [self.__gene_update_info],
         )
         _loguru.logger.info("    完成")
         return db
 
     def update_database(self) -> _lt.Decorators:
-        if self.__dbpath.is_file():
-            db = _lt.DbOperator(self.__dbpath)
-        else:
-            db = self.__create_database()
-            return db
+        """根据文件夹当前状态, 更新数据库"""
+        db = self._database
         info = self.__gene_update_info
         update_time = info[0]
 
         _loguru.logger.info("更新数据库")
         _loguru.logger.info("    载入数据库内旧的文件夹状态数据")
-        old_folder_status: self.list_sta = db.select("STATUS")
+        old_folder_status: self._t_list_sta = db.select("STATUS")
         _loguru.logger.info("    扫描文件夹变动")
-        varience = self.__gene_varience(
-            old_folder_status, self.__folder_status, update_time
+        variance = self.__gene_variance(
+            old_folder_status, self.__scan_folder_status(), update_time
         )
 
         # 更新表
         _loguru.logger.info("    更新VARIANCE表")
-        db.insert_many(
-            "VARIANCE", ["PATH", "ISFILE", "SHA256", "TIME", "CHANGE"], varience
-        )
+        db.insert_many("VARIANCE", self._variance_column_name, variance)
         _loguru.logger.info("    更新STATUS表")
-        db.insert_many(
-            "STATUS", ["PATH", "ISFILE", "SHA256", "SIZE"], self.__folder_status
-        )
+        db.try_exe("DELETE FROM STATUS;")
+        db.insert_many("STATUS", self._status_column_name, self.__scan_folder_status())
         _loguru.logger.info("    更新INFO表")
         db.insert_many(
             "INFO",
-            ["TIME", "ROOT", "MAC", "COMMENT", "VERSION"],
+            self._info_column_name,
             [info],
         )
 
         _loguru.logger.info("    完成")
         return db
+
+    def combine_variance(
+        self,
+        start_time: float = 0,
+        end_time: float = _time.time(),
+        include_left: bool = True,
+        include_right: bool = True,
+    ) -> tuple[_t_list_variance, _t_list_variance]:
+        """
+        Paramters
+        ---
+        start_time, end_time : float
+            将start_time到end_time范围内的多个VARIANCE记录合并为两个列表并返回
+        include_left, include_right : bool
+            是否包含左区间边界/右区间边界
+        Returns
+        ---
+        added_item_list, deleted_item_list
+        """
+        added_item: dict[tuple[str, str], self._t_variance] = {}
+        deleted_item: dict[tuple[str, str], self._t_variance] = {}
+
+        variance_list: self._t_list_variance = self._database.select(
+            "VARIANCE",
+            self._variance_column_name,
+            f"""WHERE
+            TIME {'>=' if include_left else '>'} {start_time}
+            AND
+            TIME {'<=' if include_right else '<'} {end_time}
+            ORDER BY TIME""",
+        )
+
+        for path, isfile, sha256, size, time, change in variance_list:
+            key = (path, sha256)
+            value = (path, isfile, sha256, size, time, change)
+
+            if change:
+                assert key not in added_item
+                added_item[key] = value
+                deleted_item.pop(key, None)
+            else:
+                assert key not in deleted_item
+                deleted_item[key] = value
+                added_item.pop(key, None)
+
+        added_item_list: self._t_list_variance = list(added_item.values())
+        deleted_item_list: self._t_list_variance = list(deleted_item.values())
+
+        return added_item_list, deleted_item_list
+
+    def extract_new_files(
+        self, output_folder: str | _pathlib.Path, start_time: float, update: bool = True
+    ):
+        """
+        从VARIANCE表中检索, 时间范围在(start_time, 现在时间]的新增现存文件, 并复制到output_folder中
+
+        Parameters
+        ---
+        output_folder : str | _pathlib.Path
+            新文件输出文件夹
+        start_time : float
+            时间范围为(start_time, 现在时间]
+        update: bool, default = True
+            是否在导出前更新数据库
+
+        Notions
+        ---
+        - 请确保在最后一次更新数据库之后, 内部文件没有发生更改, 否则可能会使用错误的sha256
+        """
+        if update:
+            self.update_database()
+
+        sha256_set: set = set()
+        output_folder = _pathlib.Path(output_folder)
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+        added, deleted = self.combine_variance(start_time, include_left=False)
+        added = _tqdm.tqdm(list(added), desc=f"导出'{self.__root.name}'中的新增文件")
+        for path, isfile, sha256, size, time, change in added:
+            file_path = self.__root / path
+            if file_path.is_dir():
+                continue
+            if not file_path.is_file():
+                _loguru.logger.debug(f"'{file_path}'不存在")
+                continue
+            if file_path == self.__dbpath:
+                # status.db重新计算sha256
+                sha256 = self._cal_sha256(file_path)
+            if size != file_path.stat().st_size:
+                # 简单检查文件是否被修改, 如果被修改, 重新计算sha256
+                sha256 = self._cal_sha256(file_path)
+            if not sha256:
+                continue
+            if sha256 in sha256_set:
+                continue
+            else:
+                sha256_set.add(sha256)
+
+            new_path = output_folder / f"{sha256}{file_path.suffix}"  # TODO no suffix
+            _shutil.copy2(file_path, new_path)
+
+        _shutil.copy2(self.__dbpath, output_folder / "status.db")
 
 
 class AutoUpdate:
@@ -386,13 +671,18 @@ class AutoUpdate:
         self.idx_path = new_idx_name
 
     @staticmethod
-    def yml2db_1_1_0(fmi_path: str | _pathlib.Path):
-        fmi_path: _pathlib.Path = _pathlib.Path(fmi_path)
-        status: str | _pathlib.Path = fmi_path / "status.yml"
-        history: str | _pathlib.Path = fmi_path / "history.yml"
-        db_path: str | _pathlib.Path = fmi_path / "status.db"
+    def yml2db_1_1_0(
+        status: str | _pathlib.Path,
+        history: str | _pathlib.Path,
+        db_path: str | _pathlib.Path,
+    ):
+        status, history, db_path = map(_pathlib.Path, (status, history, db_path))
         status_data = _lt.YamlRW.load(status)["status"]
         history_data = _lt.YamlRW.load(history)
+
+        if db_path.is_file():
+            _loguru.logger.info(f"'{db_path}'已经存在")
+            return
 
         db_sta = []
         for i in status_data["files"]:
@@ -479,7 +769,7 @@ class AutoUpdate:
                 ("CHANGE", "TINYINT", "NOT NULL"),
             ],
         )
-
+        db.try_exe("DELETE FROM STATUS;")
         db.insert_many("STATUS", ["PATH", "ISFILE", "SHA256", "SIZE"], db_sta)
         db.insert_many(
             "VARIANCE", ["PATH", "ISFILE", "SHA256", "SIZE", "TIME", "CHANGE"], db_var
@@ -489,224 +779,3 @@ class AutoUpdate:
             ["TIME", "ROOT", "MAC", "COMMENT", "VERSION"],
             db_info,
         )
-
-
-class FMcmd:
-    all_commands: dict = {}
-
-    def __init__(self):
-        pass
-
-    def repository_assets(self, filename: str):
-        return _os.path.join(_os.path.dirname(__file__), "assets", filename)
-
-    @property
-    def work_dir(self):
-        return _os.getcwd()
-
-    def get_input(self, message=""):
-        return input(f"● {self.work_dir}●{message}> ")
-
-    def start(self):
-        """开始执行循环"""
-        print("发送「help」获取帮助")
-        while 1:
-            # 输入内容
-            inp = input(f"● {self.work_dir}> ")
-            # 解析内容
-            if _re.match(r"\w* .*", inp):
-                inp: _re.Match = _re.search("^(\w*) (.*)", inp)
-                command = inp.group(1)
-                content = inp.group(2)
-            else:
-                command = inp
-                content = ""
-            # 命令执行
-            if command in ("exit", "quit"):
-                break
-            elif command in self.all_commands:
-                method: _typing.Callable = self.all_commands[command]["method"]
-                method(self, content)
-            else:
-                print("未知命令")
-
-    """
-    在类初始化过程中, 类当然不可能实例化。所以调用时候也不会传入self。
-    而这些函数在 (初始化过程中, 实例化之前) 就被修改并加入到all_commands中, 
-    在后续调用中, 其实不是调用实例化对象中的方法, 而是all_commands字典里面的方法。
-    这些方法在加入all_commands时 (初始化过程中, 实例化之前) , 还不需要self参数, 而且修饰器也没有把self传递进去,
-    所以调用时需要手动传入self。
-    """
-
-    def set_command(
-        command: str = "command",
-        document: str = "no document",
-        all_commands=all_commands,
-    ):
-        """返回装饰器, 为函数绑定命令"""
-
-        def decorator(method: _typing.Callable) -> _typing.Callable:
-            """将命令绑定的方法, 添加到命令列表中"""
-            all_commands[command] = {"method": method, "document": document}
-            return method
-
-        return decorator
-
-    def set_document(
-        command: str, document: str = "no document", all_commands=all_commands
-    ):
-        """更改对应命令的文档"""
-        if command not in all_commands:
-            all_commands[command] = {"method": lambda x: x, "document": "no document"}
-        all_commands[command]["document"] = document
-
-    @staticmethod
-    def content_resolution(content) -> tuple[list, dict]:
-        """
-        [测试中!!!]
-        -m asd asdasd -c "ass" 解析为['asdasd']和{'m': 'asd', 'c': 'ass'}
-        """
-        content_pattern = r"(?:\"[^\"]*\"|[^- ][^ ]*)"
-        pattern = r"(?:-(?P<key>\w+)(?: (?:\"(?P<value_1>[^\"]*)\"|(?P<value_2>[^- ][^ ]*)))?)|(?:(?:\"(?P<content_1>[^\"]*)\"|(?P<content_2>[^- ][^ ]*)))"
-        result = _re.finditer(pattern, content)
-        args = []
-        kwargs = {}
-        for i in result:
-            i = i.groupdict()
-            if i["key"] != None:
-                key = i["key"]
-                if i["value_1"] != None:
-                    kwargs[key] = i["value_1"]
-                else:
-                    kwargs[key] = i["value_2"]
-            else:
-                if i["content_1"] != None:
-                    args.append(i["content_1"])
-                else:
-                    args.append(i["content_2"])
-        return args, kwargs
-
-    # ====================基本命令====================
-
-    @set_command("help", "帮助")
-    def help(self, content):
-        if not content:
-            all_command_help = "\n".join(
-                [f"「{k}」\n{v['document']}" for k, v in self.all_commands.items()]
-            )
-            print(
-                f"""====================help====================
-{all_command_help}
-「exit」「quit」
-退出
-====================help===================="""
-            )
-        elif content in self.all_commands:
-            print(self.all_commands[content]["document"])
-        else:
-            print("未知命令")
-
-    @set_command(command="cd", document="改变工作路径")
-    @_lt.Decorators.except_all_error
-    def cd(self, content):
-        _os.chdir(content)
-
-    @set_command(command="edit", document="编辑tikifm")
-    def edit(self, content):
-        _os.startfile(__file__)
-
-    # ====================附加命令====================
-
-    # @set_command(command="command", document="document")
-    # def f(self, content):
-    #     pass
-
-    @set_command(command="init", document="新建fm对象")
-    def fm_init(self, content):
-        fmo_name = input("请输入对象名\n>")
-        fmo_id_len = input("请输入对象类型(子对象:8|可变对象:12|不可变对象:16)\n>")
-        fm_ver = "1.0.0-beta"
-        print("fm_ver: 1.0.0-beta")
-        # 生成基本信息
-        fmo_id = str().join(
-            _random.choices(
-                "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-                k=int(fmo_id_len),
-            )
-        )
-        fmo_exid = str().join(_random.choices("0123456789abcdef", k=128))
-        fmo_dir = _lt.System.path_join(f"{fmo_name}_{fmo_id}", self.work_dir)
-        fmo_inx_dir = _os.path.join(fmo_dir, f".fmi_{fmo_id}")
-        fmo_created_time = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime())
-
-        _os.makedirs(fmo_inx_dir)
-
-        file_index_content = f"""file_management_version: '{fm_ver}' # 文件管理的版本
-title: '{fmo_name}' # 标题
-description: '' # 对此区域的描述
-creator: '' # 创建者
-created_time: '{fmo_created_time}' # 创建时间(格式 YYYY-MM-DD HH:MM:SS)
-id: '{fmo_id}' # 对象识别号
-status_id: '{fmo_exid}' # 对象状态识别号——128位16进制(小写字母)随机字符串，在创建/更新对象时随机生成"""
-        with open(_os.path.join(fmo_inx_dir, "index.yml"), "w", encoding="utf-8") as f:
-            f.write(file_index_content)
-
-        _shutil.copy2(
-            self.repository_assets(
-                "file_management_index_folder_template\\tag_list.yml"
-            ),
-            _os.path.join(fmo_inx_dir, "tag_list.yml"),
-        )
-        _shutil.copy2(
-            self.repository_assets(
-                "file_management_index_folder_template\\tag_extension.yml"
-            ),
-            _os.path.join(fmo_inx_dir, "tag_extension.yml"),
-        )
-
-        fs = FolderStatus(fmo_dir)
-        fs.update_data(
-            data_dir=_os.path.join(fmo_inx_dir, "status.yml"),
-            history_dir=_os.path.join(fmo_inx_dir, "history.yml"),
-        )
-        eprint("创建完成")
-
-    @set_command(command="update", document="更新fm对象")
-    def fm_update(self, content):
-        fs = FolderStatus(self.work_dir)
-        for i in _os.listdir():
-            if _re.match(r"^.*\.fmi_[\da-zA-Z]+$", i):
-                fmo_inx_dir = i
-                break
-        else:
-            eprint("出错了!!!未能找到索引文件夹")
-        eprint("找到索引文件夹「{fmo_inx_dir}」")
-        fs.update_data(
-            data_dir=_os.path.join(fmo_inx_dir, "status.yml"),
-            history_dir=_os.path.join(fmo_inx_dir, "history.yml"),
-        )
-
-    @set_command(command="scan", document="检查fm对象变动")
-    def fm_scan(self, content):
-        fs = FolderStatus(self.work_dir)
-        for i in _os.listdir():
-            if _re.match(r"^.*\.fmi_[\da-zA-Z]+$", i):
-                fmo_inx_dir = i
-                break
-        else:
-            eprint("出错了!!!未能找到索引文件夹")
-        eprint("找到索引文件夹「{fmo_inx_dir}」")
-        fs.update_data(
-            data_dir=_os.path.join(fmo_inx_dir, "status.yml"),
-            history_dir=_os.path.join(fmo_inx_dir, "history.yml"),
-            only_scan_and_print=True,
-        )
-
-    @set_command(command="test_update", document="[测试功能]将本文件夹的fmi更新")
-    def test(self, content):
-        au = AutoUpdate(self.work_dir)
-
-
-if __name__ == "__main__":
-    cmd = FMcmd()
-    cmd.start()
