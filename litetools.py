@@ -462,7 +462,7 @@ class DbOperator(_sqlite3.Connection):
         表名列表
         """
         sentence = "SELECT NAME FROM SQLITE_MASTER WHERE TYPE='table' ORDER BY NAME"  # SQLITE_MASTER不区分大小写, table必须为小写
-        return [i[0] for i in self.cursor_execute(sentence)]
+        return [i[0] for i in self.execute(sentence)]
 
     def get_table_info(self, tbl_name: str):
         """
@@ -473,20 +473,23 @@ class DbOperator(_sqlite3.Connection):
         res = self.execute(f"PRAGMA table_info('{tbl_name}')")
         return list(res.fetchall())
 
-    def try_exe(self, *args, **kwargs) -> _sqlite3.Cursor:
+    def try_exe(self, sql: str, parameters: _typing.Iterable = None) -> _sqlite3.Cursor:
         """execute的自动commit版本, 如果出错会自动rollback"""
         try:
-            result = self.execute(*args, **kwargs)
+            if parameters is None:
+                result = self.execute(sql)
+            else:
+                result = self.execute(sql, parameters)
             self.commit()
             return result
         except Exception as e:
             self.rollback()
             raise e
 
-    def try_exemany(self, *args, **kwargs) -> _sqlite3.Cursor:
+    def try_exemany(self, sql: str, parameters: _typing.Iterable) -> _sqlite3.Cursor:
         """executemany的自动commit版本, 如果出错会自动rollback"""
         try:
-            result = self.executemany(*args, **kwargs)
+            result = self.executemany(sql, parameters)
             self.commit()
             return result
         except Exception as e:
@@ -521,6 +524,7 @@ class DbOperator(_sqlite3.Connection):
         table: str,
         column_name: str | _typing.Iterable[str] = "*",
         clause: str = "",
+        parameters=None,
     ) -> _sqlite3.Cursor:
         """
         查询
@@ -535,6 +539,8 @@ class DbOperator(_sqlite3.Connection):
             列名
         clause : str
             子句(比如WHERE ORDER等)
+        parameters : SupportsLenAndGetItem[_AdaptedInputData] | Mapping[str, _AdaptedInputData]
+            格式化参数
         """
         if isinstance(column_name, str):
             if column_name == "*":
@@ -545,7 +551,10 @@ class DbOperator(_sqlite3.Connection):
             column_name = ", ".join((f"{i}" for i in column_name))
 
         sentence = f"""SELECT {column_name} FROM {table} {clause};"""
-        return self.execute(sentence)
+
+        if parameters is None:
+            return self.execute(sentence)
+        return self.execute(sentence, parameters)
 
     def insert_many(
         self,
