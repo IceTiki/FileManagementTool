@@ -464,7 +464,7 @@ class FolderStatus:
     def combine_variance(
         self,
         start_time: float = 0,
-        end_time: float = _time.time(),
+        end_time: float = None,
         include_left: bool = True,
         include_right: bool = True,
     ) -> tuple[_t_list_variance, _t_list_variance]:
@@ -479,6 +479,8 @@ class FolderStatus:
         ---
         added_item_list, deleted_item_list
         """
+        end_time = _time.time() if end_time is None else end_time
+
         added_item: dict[tuple[str, str], self._t_variance] = {}
         deleted_item: dict[tuple[str, str], self._t_variance] = {}
 
