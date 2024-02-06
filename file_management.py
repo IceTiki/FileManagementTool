@@ -33,7 +33,23 @@ class ObjectFolder:
         self.__cache: dict = {}
 
     @staticmethod
-    def find_fmi(folder_path: str | _pathlib.Path) -> _pathlib.Path:
+    def __is_fmi(fmi_dir: _pathlib.Path) -> bool:
+        if not fmi_dir.is_dir():
+            return False
+
+        yaml_path = fmi_dir / "index.yml"
+        if not yaml_path.is_file():
+            return False
+        yaml_data = _lt.YamlRW.load(yaml_path)
+        if not isinstance(yaml_data, dict):
+            return False
+        if not yaml_data.get("id"):
+            return False
+
+        return True
+
+    @classmethod
+    def find_fmi(cls, folder_path: str | _pathlib.Path) -> _pathlib.Path:
         """
         优先查找名为".fmi"的文件夹, 其次查找名为".fmi_[id-8/12/16]"的文件夹
         如果未能找到唯一fmi文件夹, 则报错
@@ -54,11 +70,15 @@ class ObjectFolder:
             may_id = None
 
         fmi_list = [
-            i for i in folder_path.iterdir() if i.is_dir() and i.name[:4] == ".fmi"
+            i
+            for i in folder_path.iterdir()
+            if i.is_dir() and i.name[:4] == ".fmi"
+            if cls.__is_fmi(i)
         ]
+
         match len(fmi_list):
             case 0:
-                raise OSError("未能找到.fmi文件")
+                raise OSError("未能找到.fmi文件夹")
             case 1:
                 return fmi_list.pop()
             case _:
@@ -77,18 +97,33 @@ class ObjectFolder:
                 raise OSError("未能确定.fmi文件夹")
 
     @property
-    def fmi_dir(self):
-        if "fmi_dir" not in self.__cache:
-            self.__cache["fmi_dir"] = self.find_fmi(self.root)
-        return self.__cache["fmi_dir"]
+    def fmi_dir(self) -> _pathlib.Path:
+        key = "fmi_dir"
+        if key not in self.__cache:
+            self.__cache[key] = self.find_fmi(self.root)
+        return self.__cache[key]
 
     @property
-    def status_database_dir(self):
+    def status_database_dir(self) -> _pathlib.Path:
         return self.fmi_dir / "status.db"
 
     @property
     def folder_status(self):
         return FolderStatus(self.root, self.status_database_dir)
+
+    @property
+    def index_path(self) -> _pathlib.Path:
+        key = "index_path"
+        if key not in self.__cache:
+            self.__cache[key] = self.fmi_dir / "index.yml"
+        return self.__cache[key]
+
+    @property
+    def index_data(self) -> dict:
+        key = "index_data"
+        if key not in self.__cache:
+            self.__cache[key] = _lt.YamlRW.load(self.index_path)
+        return self.__cache[key]
 
 
 class FolderStatus:
@@ -110,7 +145,7 @@ class FolderStatus:
     _status_column_name: tuple[str] = ("PATH", "ISFILE", "SHA256", "SIZE")
     _info_column_name: tuple[str] = ("TIME", "ROOT", "MAC", "COMMENT", "VERSION")
 
-    force_hash: bool = False  # 是否强制计算所有文件哈希值(如果为False, 则通过mtime、size等参数判断文件是否需要重新计算哈希)
+    fast_scan: bool = True  # 快速扫描文件更改(如果为True, 则通过mtime、size等参数判断文件是否跳过计算哈希)
 
     def __init__(
         self,
@@ -203,12 +238,13 @@ class FolderStatus:
 
     @property
     def __gene_path_status(self) -> _typing.Callable[[_pathlib.Path], _t_path_sta]:
-        if self.force_hash:
+        """生成路径状态信息函数, 通过self.fast_scan判断是否使用快速生成"""
+        if not self.fast_scan:
             return self.__calculating_path_status
         else:
-            update_time_list: float = map(
-                lambda x: x[0], self._database.select("INFO", "TIME")
-            )
+            update_time_list: list[float] = [
+                i[0] for i in self._database.select("INFO", "TIME")
+            ]
             last_update_time: float = max(update_time_list, default=0)
             db_data: dict[str, self._t_path_sta] = {
                 i[0]: i for i in self._database.select("STATUS")
@@ -375,7 +411,7 @@ class FolderStatus:
             self.__cache[key] = sta
         return self.__cache[key]
 
-    def __create_database(self) -> _lt.Decorators:
+    def __create_database(self) -> _lt.DbOperator:
         """创建数据库"""
         dbpath = self.__dbpath
         _loguru.logger.info("创建数据库")
@@ -431,7 +467,7 @@ class FolderStatus:
         _loguru.logger.info("    完成")
         return db
 
-    def update_database(self) -> _lt.Decorators:
+    def update_database(self) -> _lt.DbOperator:
         """根据文件夹当前状态, 更新数据库"""
         db = self._database
         info = self.__gene_update_info
@@ -513,7 +549,11 @@ class FolderStatus:
         return added_item_list, deleted_item_list
 
     def extract_new_files(
-        self, output_folder: str | _pathlib.Path, start_time: float, update: bool = True
+        self,
+        output: str | _pathlib.Path,
+        start_time: float,
+        update: bool = True,
+        archive: None | str = None,
     ):
         """
         从VARIANCE表中检索, 时间范围在(start_time, 现在时间]的新增现存文件, 并复制到output_folder中
@@ -524,8 +564,10 @@ class FolderStatus:
             新文件输出文件夹
         start_time : float
             时间范围为(start_time, 现在时间]
-        update: bool, default = True
+        update : bool, default = True
             是否在导出前更新数据库
+        archive: None | str, default = None
+            是否打包为压缩包, 如果类型为str, 则将archive作为压缩包密码
 
         Notions
         ---
@@ -535,12 +577,28 @@ class FolderStatus:
             self.update_database()
 
         sha256_set: set = set()
-        output_folder = _pathlib.Path(output_folder)
-        output_folder.mkdir(parents=True, exist_ok=True)
+        output = _pathlib.Path(output)
 
-        added, deleted = self.combine_variance(start_time, include_left=False)
+        added, _ = self.combine_variance(start_time, include_left=False)
         added = _tqdm.tqdm(list(added), desc=f"导出'{self.__root.name}'中的新增文件")
-        for path, isfile, sha256, size, time, change in added:
+
+        match archive:
+            case None:
+                output.mkdir(parents=True, exist_ok=True)
+                extract_method = lambda from_path, to_name: _shutil.copy2(
+                    from_path, output / to_name
+                )
+            case str():
+                output.parent.mkdir(parents=True, exist_ok=True)
+                archive_file = _lt.Easy7zWrite(output, password=archive)
+                extract_method = lambda from_path, to_name: archive_file.write(
+                    from_path, to_name
+                )
+            case _:
+                raise ValueError(f"Unknown type of archive ({type(archive)}).")
+        extract_method: _typing.Callable[[_pathlib.Path, str], None]
+
+        for path, _, sha256, size, _, _ in added:
             file_path = self.__root / path
             if file_path.is_dir():
                 continue
@@ -560,10 +618,13 @@ class FolderStatus:
             else:
                 sha256_set.add(sha256)
 
-            new_path = output_folder / f"{sha256}{file_path.suffix}"  # TODO no suffix
-            _shutil.copy2(file_path, new_path)
+            new_path = f"{sha256}{file_path.suffix}"  # TODO no suffix
+            extract_method(file_path, new_path)
 
-        _shutil.copy2(self.__dbpath, output_folder / "status.db")
+        extract_method(self.__dbpath, "status.db")
+        match archive:
+            case str():
+                archive_file.close()
 
 
 class AutoUpdate:
