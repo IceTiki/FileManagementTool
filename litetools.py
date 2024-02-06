@@ -2,9 +2,11 @@
 import os as _os
 import json as _json
 import hashlib as _hashlib
+import pathlib
 import traceback as _traceback
 import sys as _sys
 import io as _io
+from typing import BinaryIO, Dict, List, Optional, Union
 import uuid as _uuid
 import time as _time
 import sqlite3 as _sqlite3
@@ -591,3 +593,28 @@ class DbOperator(_sqlite3.Connection):
         return self.try_exemany(sentence, data)
 
     _update = "UPDATE table SET column_name1 = ? where column_name2 = ?;"
+
+
+class Easy7zWrite(py7zr.SevenZipFile):
+    """用于写入的SevenZipFile, 仅提供无压缩、可选加密的写入功能"""
+
+    def __init__(
+        self,
+        file: BinaryIO | str | pathlib.Path,
+        password: str | None = None,
+    ) -> None:
+        if password:
+            crypyto_kwargs = {
+                "header_encryption": True,
+                "filters": [
+                    {"id": py7zr.FILTER_COPY},
+                    {"id": py7zr.FILTER_CRYPTO_AES256_SHA256},
+                ],
+            }
+        else:
+            crypyto_kwargs = {
+                "header_encryption": False,
+                "filters": [{"id": py7zr.FILTER_COPY}],
+            }
+
+        super().__init__(file, password=password, mode="w", **crypyto_kwargs)
