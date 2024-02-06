@@ -1,6 +1,11 @@
 import typing
 import pathlib
 
+"""
+TODO
+在fm的TagString中新增""的key?
+"""
+
 
 class TagPath(pathlib.Path):
     """
@@ -14,11 +19,10 @@ class TagPath(pathlib.Path):
 
     # type(pathlib.Path())是pathlib.Path根据当前系统判断, 实例化哪种类型的Path
     _flavour = type(pathlib.Path())._flavour
+    _T_TagData = list[str | dict]
 
     @classmethod
-    def from_tag_data(
-        cls, items: list[str | dict], beautify: bool = False
-    ) -> typing.Self:
+    def from_tagdata(cls, items: _T_TagData, beautify: bool = False) -> typing.Self:
         """
         将列表格式化为TagString字符串
 
@@ -39,6 +43,28 @@ class TagPath(pathlib.Path):
             return cls(cls.Formater.beautify_join(items))
         return cls(cls.Formater.join(items))
 
+    @classmethod
+    def formating_tagdata(cls, items: _T_TagData, beautify: bool = False) -> str:
+        """
+        将列表格式化为TagString字符串
+
+        Notions
+        ---
+        如果启用beautify, 那么
+        - 列表中的所有字典会合并到同一个字典中, 首层key会被排序
+        - 为避免反复转义, 列表中的所有字符串会被加入到字典中, 键为""(空字符串)的列表中
+
+        Parameters
+        ---
+        items : list[str | dict]
+            ...
+        beautify : bool
+            是否启用美化
+        """
+        if beautify:
+            return cls.Formater.beautify_join(items)
+        return cls.Formater.join(items)
+
     def __new__(cls, string: str | pathlib.Path):
         return super(TagPath, cls).__new__(cls, string)
 
@@ -50,7 +76,7 @@ class TagPath(pathlib.Path):
         return self.parsed.__iter__()
 
     @property
-    def parsed(self) -> list[str | dict]:
+    def parsed(self) -> _T_TagData:
         """分段解析字符串, TagString解析为字典, 其他保留原样"""
         return self.Parser(self.stem).resolute()
 
