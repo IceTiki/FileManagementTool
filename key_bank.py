@@ -305,6 +305,7 @@ class CoreBank(StdAesEncryptedFile):
 
 
 class KeyBank(StdAesEncryptedFile):
+    """普通密码库"""
     bank_extension = ".keybank"
 
     def __init__(self, bankname: str, password: str) -> None:
@@ -543,8 +544,9 @@ class KBcmd:
         # 创建密码库
         KeyBank.bank_init(bank_name, bank_key, core_key)
 
-    @set_command(command="update_bank", document="更新密码库")
-    def update_bank(self, content):
+    @Decorators.except_all_error
+    @set_command(command="modify", document="更新密码库")
+    def modify_bank(self, content):
         bankname = input("请输入密码库名> ")
         bankkey = input("请输入密码库密码> ")
         kb = KeyBank(bankname, bankkey)
